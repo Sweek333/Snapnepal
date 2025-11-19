@@ -14,12 +14,31 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
-  // Load photos from localStorage on mount
+  // Load photos from localStorage on mount and handle 24h expiration
   useEffect(() => {
     const savedPhotos = localStorage.getItem('retro-snap-gallery');
     if (savedPhotos) {
       try {
-        setGalleryPhotos(JSON.parse(savedPhotos));
+        const parsed: PhotoData[] = JSON.parse(savedPhotos);
+        const now = Date.now();
+        const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+
+        const validPhotos = parsed.filter(p => {
+            // If legacy photo (no timestamp), keep it (or optional: expire immediately)
+            // Here we keep it to be nice to existing users
+            if (!p.timestamp) return true;
+            
+            // Check if photo is older than 24 hours
+            return (now - p.timestamp) < twentyFourHoursMs;
+        });
+
+        // If we filtered out any old photos, update storage
+        if (validPhotos.length !== parsed.length) {
+            console.log(`Cleaned up ${parsed.length - validPhotos.length} expired memories.`);
+            localStorage.setItem('retro-snap-gallery', JSON.stringify(validPhotos));
+        }
+        
+        setGalleryPhotos(validPhotos);
       } catch (e) {
         console.error("Failed to load gallery photos", e);
       }
@@ -42,7 +61,8 @@ const App: React.FC = () => {
         zIndex: sessionPhotos.length + 1,
         // Tighter spread to ensure visibility on all screens
         x: randomRange(-40, 40), 
-        y: randomRange(-40, 40), 
+        y: randomRange(-40, 40),
+        timestamp: Date.now(), // Add timestamp for expiration
       };
 
       // Add to current session (scattered view)
@@ -77,12 +97,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleClearGallery = () => {
-     if (window.confirm("Delete all photos from the Pinboard Gallery permanently?")) {
-        setGalleryPhotos([]);
-        localStorage.removeItem('retro-snap-gallery');
-     }
-  }
+  const handleDeletePhoto = (id: string) => {
+    // Confirmation is now handled in the Polaroid component for better UX
+    const updatedGallery = galleryPhotos.filter((p) => p.id !== id);
+    setGalleryPhotos(updatedGallery);
+    localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
+    
+    // Also remove from session if present
+    setSessionPhotos((prev) => prev.filter((p) => p.id !== id));
+  };
 
   return (
     <div className="relative min-h-screen w-full bg-[#e5e5e5] bg-dot-pattern flex flex-col overflow-hidden">
@@ -91,25 +114,26 @@ const App: React.FC = () => {
         isOpen={isGalleryOpen} 
         onClose={() => setIsGalleryOpen(false)} 
         photos={galleryPhotos}
+        onDeletePhoto={handleDeletePhoto}
       />
 
       {/* Top Bar - Increased Z-Index */}
-      <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-start z-[60] pointer-events-none">
+      <div className="absolute top-0 left-0 w-full p-4 sm:p-6 flex justify-between items-start z-[60] pointer-events-none">
         <div className="pointer-events-auto flex space-x-2">
            {/* Left side branding or tools could go here */}
         </div>
         
-        <div className="pointer-events-auto flex flex-col sm:flex-row gap-3">
+        <div className="pointer-events-auto flex flex-row gap-2 sm:gap-3">
           <button 
             onClick={handleDownload}
             disabled={sessionPhotos.length === 0}
-            className="bg-white border-2 border-black text-black px-6 py-2 rounded-full font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all active:translate-y-[4px] active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed text-sm tracking-wider"
+            className="bg-white border-2 border-black text-black px-4 sm:px-6 py-2 rounded-full font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all active:translate-y-[4px] active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm tracking-wider"
           >
             DOWNLOAD
           </button>
           <button 
             onClick={handleReset}
-            className="bg-white border-2 border-[#FF6B6B] text-[#FF6B6B] px-6 py-2 rounded-full font-bold shadow-[4px_4px_0px_0px_#FF6B6B] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_#FF6B6B] transition-all active:translate-y-[4px] active:shadow-none text-sm tracking-wider"
+            className="bg-white border-2 border-[#FF6B6B] text-[#FF6B6B] px-4 sm:px-6 py-2 rounded-full font-bold shadow-[3px_3px_0px_0px_#FF6B6B] sm:shadow-[4px_4px_0px_0px_#FF6B6B] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_#FF6B6B] transition-all active:translate-y-[4px] active:shadow-none text-xs sm:text-sm tracking-wider"
           >
             RESET
           </button>
@@ -120,17 +144,17 @@ const App: React.FC = () => {
       <div className="flex-1 relative flex items-center justify-center lg:justify-start lg:pl-32">
         
         {/* Camera Container */}
-        <div className="relative z-40 scale-75 sm:scale-100 transition-transform">
+        <div className="relative z-40 scale-[0.65] xs:scale-75 sm:scale-100 transition-transform">
            <RetroCamera onTakePhoto={handleTakePhoto} isProcessing={isProcessing} />
         </div>
 
         {/* Photo Gallery Area - Scattered on the right */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
            <div className="relative w-full h-full flex items-center justify-center lg:justify-end lg:pr-32">
-              <div className="relative w-[500px] h-[500px] pointer-events-auto">
+              <div className="relative w-[300px] h-[300px] sm:w-[500px] sm:h-[500px] pointer-events-auto">
                 {sessionPhotos.length === 0 && !isProcessing && (
                    <div className="absolute inset-0 flex items-center justify-center opacity-30 -rotate-6">
-                      <p className="font-hand text-4xl text-gray-500">Ready to snap?</p>
+                      <p className="font-hand text-2xl sm:text-4xl text-gray-500 text-center px-4">Ready to snap?</p>
                    </div>
                 )}
                 {sessionPhotos.map((photo) => (
@@ -145,19 +169,20 @@ const App: React.FC = () => {
       </div>
 
       {/* Bottom Left Action */}
-      <div className="absolute bottom-6 left-6 z-50 flex items-end gap-2">
+      <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 z-50 flex items-end gap-2">
         <button 
           onClick={() => setIsGalleryOpen(true)}
-          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-5 py-3 rounded-xl font-bold shadow-[4px_4px_0px_0px_#3E2723] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_#3E2723] transition-all flex items-center gap-2 text-xs sm:text-sm group"
+          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-3 py-2 sm:px-5 sm:py-3 rounded-xl font-bold shadow-[3px_3px_0px_0px_#3E2723] sm:shadow-[4px_4px_0px_0px_#3E2723] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_#3E2723] transition-all flex items-center gap-2 text-xs sm:text-sm group"
         >
           <span className="text-lg group-hover:rotate-12 transition-transform">📌</span> 
-          View Public Pinboard Gallery 
+          <span className="hidden xs:inline">View Public Pinboard Gallery</span>
+          <span className="xs:hidden">Gallery</span>
           <span className="bg-[#5D4037] px-2 py-0.5 rounded-full text-[10px] ml-1">{galleryPhotos.length}</span>
         </button>
       </div>
 
       {/* Footer/Hint */}
-      <div className="absolute bottom-6 right-6 z-40 text-right opacity-60 pointer-events-none hidden sm:block">
+      <div className="absolute bottom-6 right-6 z-40 text-right opacity-60 pointer-events-none hidden md:block">
         <p className="font-hand text-sm font-bold text-gray-600 uppercase tracking-wide">Use once to capture your day</p>
         <p className="font-hand text-xs text-gray-500">through everyone's eyes →</p>
       </div>

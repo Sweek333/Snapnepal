@@ -7,6 +7,7 @@ export interface PhotoData {
   zIndex: number;
   x?: number; // Random positioning
   y?: number;
+  timestamp?: number; // Created time in ms
 }
 
 export interface GeminiResponse {
