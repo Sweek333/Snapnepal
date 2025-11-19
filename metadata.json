@@ -1,0 +1,8 @@
+{
+  "name": "Copy of RetroSnap AI",
+  "description": "A cute, retro-style camera app that turns your moments into instant photos with AI-generated aesthetic captions.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
