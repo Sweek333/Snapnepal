@@ -1,9 +1,15 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { RetroCamera } from './components/RetroCamera';
 import { Polaroid } from './components/Polaroid';
 import { PinboardGallery } from './components/PinboardGallery';
 import { PhotoData } from './types';
 import { generatePhotoCaption } from './services/geminiService';
+import { 
+  uploadPhotoToSupabase, 
+  savePhotoToDB, 
+  subscribeToPhotos, 
+  deletePhotoFromSupabase 
+} from './services/supabase';
 
 // Helper to generate random numbers within a range
 const randomRange = (min: number, max: number) => Math.random() * (max - min) + min;
@@ -13,90 +19,58 @@ const App: React.FC = () => {
   const [galleryPhotos, setGalleryPhotos] = useState<PhotoData[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  
-  // Channel for live updates across tabs
-  const syncChannel = useRef<BroadcastChannel | null>(null);
+  const [isCloudConnected, setIsCloudConnected] = useState(true); 
 
-  // Load photos and setup sync listeners
+  // Initialize Realtime Subscription
   useEffect(() => {
-    // Initialize BroadcastChannel
-    syncChannel.current = new BroadcastChannel('retro_snap_sync');
-
-    const loadGallery = () => {
-      const savedPhotos = localStorage.getItem('retro-snap-gallery');
-      if (savedPhotos) {
-        try {
-          const parsed: PhotoData[] = JSON.parse(savedPhotos);
-          
-          // Sort by timestamp if available, otherwise keep order
-          const sortedPhotos = parsed.sort((a, b) => {
-             const tA = a.timestamp || 0;
-             const tB = b.timestamp || 0;
-             return tA - tB;
-          });
-          
-          setGalleryPhotos(sortedPhotos);
-        } catch (e) {
-          console.error("Failed to load gallery photos", e);
-        }
-      }
-    };
-
-    // Initial load
-    loadGallery();
-
-    // Listen for updates from other tabs (BroadcastChannel)
-    syncChannel.current.onmessage = () => {
-        loadGallery();
-    };
-
-    // Listen for storage events (fallback for some browsers)
-    const handleStorageChange = (e: StorageEvent) => {
-        if (e.key === 'retro-snap-gallery') {
-            loadGallery();
-        }
-    };
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      syncChannel.current?.close();
-      window.removeEventListener('storage', handleStorageChange);
-    };
+    const unsubscribe = subscribeToPhotos((updatedPhotos) => {
+      setGalleryPhotos(updatedPhotos);
+      // If we got photos, assume connection is okay-ish, or we are using local fallback
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleTakePhoto = useCallback(async (imageData: string) => {
     setIsProcessing(true);
 
     try {
-      // Generate caption using Gemini
+      const timestamp = Date.now();
+      const photoId = crypto.randomUUID();
+
+      // 1. Generate caption using Gemini
       const aiData = await generatePhotoCaption(imageData);
 
+      // 2. Upload image to Supabase Storage (or fallback to base64)
+      const publicUrl = await uploadPhotoToSupabase(imageData, photoId);
+      
+      if (!publicUrl) throw new Error("Failed to process image data");
+
       const newPhoto: PhotoData = {
-        id: Date.now().toString() + Math.random().toString(36).slice(2),
-        imageUrl: imageData,
+        id: photoId,
+        imageUrl: publicUrl,
         caption: aiData.caption,
         date: aiData.date,
         rotation: randomRange(-12, 12),
         zIndex: sessionPhotos.length + 1,
-        // Tighter spread to ensure visibility on all screens
         x: randomRange(-40, 40), 
         y: randomRange(-40, 40),
-        timestamp: Date.now(),
+        timestamp: timestamp,
       };
 
-      // Add to current session (scattered view)
+      // 3. Add to current session (instant feedback)
       setSessionPhotos((prev) => [...prev, newPhoto]);
 
-      // Add to persistent gallery (Read-Modify-Write for safety)
-      const existingJson = localStorage.getItem('retro-snap-gallery');
-      const currentGallery: PhotoData[] = existingJson ? JSON.parse(existingJson) : [];
-      const updatedGallery = [...currentGallery, newPhoto];
-      
-      localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
-      setGalleryPhotos(updatedGallery);
+      // 4. Save metadata to Supabase DB (triggers realtime for others)
+      const savedToCloud = await savePhotoToDB(newPhoto);
 
-      // Broadcast update to other tabs
-      syncChannel.current?.postMessage('update');
+      if (!savedToCloud) {
+          // Fallback: If cloud failed (e.g. missing table), manually add to gallery view
+          // so the user sees it immediately.
+          setIsCloudConnected(false);
+          setGalleryPhotos((prev) => [newPhoto, ...prev]);
+      } else {
+          setIsCloudConnected(true);
+      }
 
     } catch (error) {
       console.error("Error processing photo:", error);
@@ -107,35 +81,30 @@ const App: React.FC = () => {
 
   const handleDownload = () => {
     if (sessionPhotos.length > 0) {
+       const photo = sessionPhotos[sessionPhotos.length - 1];
        const link = document.createElement('a');
-       link.download = `retro-snap-${sessionPhotos[sessionPhotos.length -1].id}.png`;
-       link.href = sessionPhotos[sessionPhotos.length - 1].imageUrl;
+       link.download = `retro-snap-${photo.id}.png`;
+       link.href = photo.imageUrl;
+       link.target = "_blank";
        link.click();
     }
   };
 
   const handleReset = () => {
-    if (window.confirm("Clear all your session memories? (Gallery will stay safe)")) {
+    if (window.confirm("Clear your current session view? (Gallery photos remain in the cloud)")) {
       setSessionPhotos([]);
     }
   };
 
-  const handleDeletePhoto = (id: string) => {
-    // Read fresh from LS to avoid race conditions with other tabs
-    const existingJson = localStorage.getItem('retro-snap-gallery');
-    if (existingJson) {
-        const currentGallery: PhotoData[] = JSON.parse(existingJson);
-        const updatedGallery = currentGallery.filter((p) => p.id !== id);
-        
-        localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
-        setGalleryPhotos(updatedGallery);
-        
-        // Notify other tabs
-        syncChannel.current?.postMessage('update');
-    }
+  const handleDeletePhoto = async (id: string) => {
+    // Delete from Supabase (DB & Storage) or LocalStorage Fallback
+    await deletePhotoFromSupabase(id);
     
-    // Also remove from session if present
+    // Remove from local session state if present
     setSessionPhotos((prev) => prev.filter((p) => p.id !== id));
+    
+    // Manually update gallery state just in case realtime/fallback doesn't trigger instantly
+    setGalleryPhotos((prev) => prev.filter((p) => p.id !== id));
   };
 
   return (
@@ -148,10 +117,16 @@ const App: React.FC = () => {
         onDeletePhoto={handleDeletePhoto}
       />
 
-      {/* Top Bar - Increased Z-Index */}
+      {/* Top Bar */}
       <div className="absolute top-0 left-0 w-full p-4 sm:p-6 flex justify-between items-start z-[60] pointer-events-none">
         <div className="pointer-events-auto flex space-x-2">
-           {/* Left side branding or tools could go here */}
+           {/* Cloud Status Indicator */}
+           <div className="bg-white/80 backdrop-blur px-3 py-1 rounded-full border border-gray-200 shadow-sm flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                {isCloudConnected ? 'SUPABASE LIVE' : 'LOCAL MODE'}
+              </span>
+           </div>
         </div>
         
         <div className="pointer-events-auto flex flex-row gap-2 sm:gap-3">
@@ -206,7 +181,7 @@ const App: React.FC = () => {
           className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-3 py-2 sm:px-5 sm:py-3 rounded-xl font-bold shadow-[3px_3px_0px_0px_#3E2723] sm:shadow-[4px_4px_0px_0px_#3E2723] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_#3E2723] transition-all flex items-center gap-2 text-xs sm:text-sm group"
         >
           <span className="text-lg group-hover:rotate-12 transition-transform">📌</span> 
-          <span className="hidden xs:inline">View Pinboard Gallery</span>
+          <span className="hidden xs:inline">View Global Gallery</span>
           <span className="xs:hidden">Gallery</span>
           <span className="bg-[#5D4037] px-2 py-0.5 rounded-full text-[10px] ml-1">{galleryPhotos.length}</span>
         </button>

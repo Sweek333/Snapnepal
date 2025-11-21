@@ -8,24 +8,48 @@ interface RetroCameraProps {
 export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcessing }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
   const [flashActive, setFlashActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   useEffect(() => {
-    const startCamera = async () => {
+    let stream: MediaStream | null = null;
+
+    const startCamera = async (useExactConstraints = true) => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraError("Camera API not supported");
+        return;
+      }
+
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 720, height: 720, facingMode: "user" },
-          audio: false,
-        });
-        setStream(mediaStream);
+        // First try: Ideal constraints (User facing, square-ish)
+        // Second try (Fallback): Any video
+        const constraints = useExactConstraints 
+          ? { video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 720 } }, audio: false }
+          : { video: true, audio: false };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        
         if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
+          videoRef.current.srcObject = stream;
+          setCameraError(null);
         }
-      } catch (err) {
-        console.error("Error accessing camera:", err);
-        setCameraError("Camera access denied. Please allow permissions.");
+      } catch (err: any) {
+        console.warn("Camera access attempt failed:", err);
+        
+        // If first attempt failed, retry with looser constraints
+        if (useExactConstraints) {
+           console.log("Retrying with loose constraints...");
+           startCamera(false);
+           return;
+        }
+
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setCameraError("Camera permission denied");
+        } else if (err.name === 'NotFoundError') {
+          setCameraError("No camera found");
+        } else {
+          setCameraError("Camera access failed");
+        }
       }
     };
 
@@ -46,8 +70,6 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 200);
 
-    // Sound effect (optional, simulating with logic for now)
-    
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
@@ -107,8 +129,9 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
 
                  {/* Error Message */}
                  {cameraError && (
-                   <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-4 text-center">
-                     <p className="text-white text-xs font-bold">{cameraError}</p>
+                   <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-4 text-center z-10">
+                     <p className="text-white text-xs font-bold leading-tight">{cameraError}</p>
+                     <button onClick={() => window.location.reload()} className="mt-2 text-[10px] bg-white/20 px-2 py-1 rounded">Retry</button>
                    </div>
                  )}
             </div>
