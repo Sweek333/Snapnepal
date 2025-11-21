@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { PhotoData } from '../types';
 import { Polaroid } from './Polaroid';
@@ -8,8 +9,8 @@ interface FilmStripProps {
 }
 
 export const FilmStrip: React.FC<FilmStripProps> = ({ photos, onPhotoClick }) => {
-  if (photos.length === 0) return null;
-
+  // We show even if empty to give the visual anchor at bottom
+  
   return (
     <div className="fixed bottom-0 left-0 w-full h-[220px] z-[55] pointer-events-none flex flex-col justify-end pb-4">
        {/* Background gradient to fade out content behind strip */}
@@ -23,14 +24,18 @@ export const FilmStrip: React.FC<FilmStripProps> = ({ photos, onPhotoClick }) =>
 
           {/* Scrolling Content - Flex container */}
           <div className="flex items-center px-4 space-x-4 min-w-max">
-             {photos.map((photo) => (
-                <Polaroid 
-                   key={`film-${photo.id}`} 
-                   photo={photo} 
-                   variant="filmstrip"
-                   onClick={() => onPhotoClick && onPhotoClick(photo)}
-                />
-             ))}
+             {photos.length === 0 ? (
+                <div className="text-white/30 font-hand text-xl px-8">Waiting for your first snap...</div>
+             ) : (
+                photos.map((photo) => (
+                    <Polaroid 
+                       key={`film-${photo.id}`} 
+                       photo={photo} 
+                       variant="filmstrip"
+                       onClick={() => onPhotoClick && onPhotoClick(photo)}
+                    />
+                 ))
+             )}
           </div>
 
           {/* Sprocket holes bottom */}
@@ -42,7 +47,9 @@ export const FilmStrip: React.FC<FilmStripProps> = ({ photos, onPhotoClick }) =>
        </div>
 
        <div className="absolute bottom-[190px] right-4 pointer-events-none animate-pulse">
-          <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-lg">Live Feed ●</span>
+          <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest shadow-lg">
+            {photos.length > 0 ? `Live Gallery (${photos.length})` : 'Live Gallery'}
+          </span>
        </div>
     </div>
   );

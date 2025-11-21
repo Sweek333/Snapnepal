@@ -1,31 +1,29 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { RetroCamera } from './components/RetroCamera';
 import { Polaroid } from './components/Polaroid';
 import { PinboardGallery } from './components/PinboardGallery';
-import { FilmStrip } from './components/FilmStrip';
 import { PhotoData } from './types';
 import { generatePhotoCaption } from './services/geminiService';
 import { 
-  uploadPhotoToSupabase, 
-  savePhotoToDB, 
-  subscribeToPhotos, 
-  deletePhotoFromSupabase 
+  uploadAndSavePhoto, 
+  useRealtimePhotos,
+  deletePhoto
 } from './services/supabase';
 
 // Helper to generate random numbers within a range
 const randomRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
 const App: React.FC = () => {
-  const [sessionPhotos, setSessionPhotos] = useState<PhotoData[]>([]);
-  const [galleryPhotos, setGalleryPhotos] = useState<PhotoData[]>([]);
+  const [galleryPhotos, setGalleryPhotos] = useState<PhotoData[]>([]); // The global gallery
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [isCloudConnected, setIsCloudConnected] = useState(true); 
+  const [showToast, setShowToast] = useState(false);
 
   // Initialize Realtime Subscription
   useEffect(() => {
-    // This now handles merging Local + Cloud data to ensure persistence
-    const unsubscribe = subscribeToPhotos((updatedPhotos) => {
+    // This hook handles fetching initial data AND listening for new inserts/deletes
+    const unsubscribe = useRealtimePhotos((updatedPhotos) => {
       setGalleryPhotos(updatedPhotos);
     });
     return () => unsubscribe();
@@ -35,74 +33,72 @@ const App: React.FC = () => {
     setIsProcessing(true);
 
     try {
-      const timestamp = Date.now();
       const photoId = crypto.randomUUID();
 
       // 1. Generate caption using Gemini
       const aiData = await generatePhotoCaption(imageData);
 
-      // 2. Upload image to Supabase Storage (or base64 fallback)
-      const publicUrl = await uploadPhotoToSupabase(imageData, photoId);
-      
-      if (!publicUrl) throw new Error("Failed to process image data");
-
-      const newPhoto: PhotoData = {
+      // 2. Prepare Metadata
+      const newPhotoMeta = {
         id: photoId,
-        imageUrl: publicUrl,
         caption: aiData.caption,
         date: aiData.date,
         rotation: randomRange(-12, 12),
-        zIndex: sessionPhotos.length + 1,
+        zIndex: 1, // DB default
         x: randomRange(-40, 40), 
         y: randomRange(-40, 40),
-        timestamp: timestamp,
       };
 
-      // 3. Add to current session view (instant feedback)
-      setSessionPhotos((prev) => [...prev, newPhoto]);
+      // 3. Optimistic Update: Show photo IMMEDIATELY locally
+      // This ensures the user feels the app is instant, even if cloud sync is slow or fails
+      const optimisticPhoto: PhotoData = {
+        ...newPhotoMeta,
+        imageUrl: imageData,
+        timestamp: Date.now(),
+        zIndex: 10
+      };
+      setGalleryPhotos(prev => [optimisticPhoto, ...prev]);
 
-      // 4. Save to DB (and Local Storage automatically via the service)
-      const savedToCloud = await savePhotoToDB(newPhoto);
+      // Show confirmation toast
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 3000);
 
-      if (!savedToCloud) {
-          setIsCloudConnected(false);
-      } else {
-          setIsCloudConnected(true);
+      // 4. Upload to Storage AND Insert Row to DB
+      // This triggers the realtime event for everyone else. 
+      // If it fails, we log it, but we've already shown the photo locally.
+      try {
+        await uploadAndSavePhoto(imageData, newPhotoMeta);
+      } catch (cloudError) {
+        console.warn("Cloud sync failed (using local only mode):", cloudError);
+        // We intentionally do NOT remove the photo from the gallery.
+        // It stays as a "local memory" for this session.
       }
-      
-      // Note: subscribeToPhotos will automatically trigger and update galleryPhotos
 
     } catch (error) {
       console.error("Error processing photo:", error);
+      // Only alert if something strictly local (like AI generation) failed before we could even show the photo
+      alert("Something went wrong processing your photo.");
     } finally {
       setIsProcessing(false);
     }
-  }, [sessionPhotos.length]);
-
-  const handleDownload = () => {
-    if (sessionPhotos.length > 0) {
-       const photo = sessionPhotos[sessionPhotos.length - 1];
-       const link = document.createElement('a');
-       link.download = `retro-snap-${photo.id}.png`;
-       link.href = photo.imageUrl;
-       link.target = "_blank";
-       link.click();
-    }
-  };
-
-  const handleReset = () => {
-    if (window.confirm("Clear your current session view? (Gallery photos remain in the cloud)")) {
-      setSessionPhotos([]);
-    }
-  };
+  }, []);
 
   const handleDeletePhoto = async (id: string) => {
-    // Optimistic update
-    setGalleryPhotos((prev) => prev.filter((p) => p.id !== id));
-    setSessionPhotos((prev) => prev.filter((p) => p.id !== id));
-    
-    // Perform actual delete
-    await deletePhotoFromSupabase(id);
+    // Optimistic delete locally
+    setGalleryPhotos(prev => prev.filter(p => p.id !== id));
+    // Perform actual delete (Realtime will propagate/confirm this)
+    await deletePhoto(id);
+  };
+  
+  const handleDownload = () => {
+    // Logic to download latest session photo if needed
+    if (galleryPhotos.length > 0) {
+        const photo = galleryPhotos[0];
+        const link = document.createElement('a');
+        link.href = photo.imageUrl;
+        link.download = `retro-${photo.id}.png`;
+        link.click();
+    }
   };
 
   return (
@@ -115,14 +111,20 @@ const App: React.FC = () => {
         onDeletePhoto={handleDeletePhoto}
       />
 
+      {/* Notification Toast */}
+      {showToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-[#5D4037]/90 backdrop-blur text-white px-6 py-3 rounded-full z-[70] animate-in fade-in slide-in-from-top-4 font-hand text-lg sm:text-xl shadow-xl flex items-center gap-2 border-2 border-white/20">
+          <span>✨</span> Saved to Public Gallery!
+        </div>
+      )}
+
       {/* Top Bar */}
       <div className="absolute top-0 left-0 w-full p-4 sm:p-6 flex justify-between items-start z-[60] pointer-events-none">
         <div className="pointer-events-auto flex space-x-2">
-           {/* Cloud Status Indicator */}
            <div className="bg-white/80 backdrop-blur px-3 py-1 rounded-full border border-gray-200 shadow-sm flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                {isCloudConnected ? 'Supabase Live' : 'Local Mode'}
+                Live Gallery
               </span>
            </div>
         </div>
@@ -130,39 +132,35 @@ const App: React.FC = () => {
         <div className="pointer-events-auto flex flex-row gap-2 sm:gap-3">
           <button 
             onClick={handleDownload}
-            disabled={sessionPhotos.length === 0}
             className="bg-white border-2 border-black text-black px-4 sm:px-6 py-2 rounded-full font-bold shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all active:translate-y-[4px] active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm tracking-wider"
           >
-            DOWNLOAD
-          </button>
-          <button 
-            onClick={handleReset}
-            className="bg-white border-2 border-[#FF6B6B] text-[#FF6B6B] px-4 sm:px-6 py-2 rounded-full font-bold shadow-[3px_3px_0px_0px_#FF6B6B] sm:shadow-[4px_4px_0px_0px_#FF6B6B] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_#FF6B6B] transition-all active:translate-y-[4px] active:shadow-none text-xs sm:text-sm tracking-wider"
-          >
-            RESET
+            DOWNLOAD LAST
           </button>
         </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 relative flex items-center justify-center lg:justify-start lg:pl-32 pb-48">
+      <div className="flex-1 relative flex items-center justify-center lg:justify-start lg:pl-32 pb-20">
         
         {/* Camera Container */}
         <div className="relative z-40 scale-[0.65] xs:scale-75 sm:scale-100 transition-transform">
            <RetroCamera onTakePhoto={handleTakePhoto} isProcessing={isProcessing} />
         </div>
 
-        {/* Photo Gallery Area - Scattered on the right (Session Only) */}
+        {/* Photo Gallery Area - Use the top few gallery photos for the scattered view */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
            <div className="relative w-full h-full flex items-center justify-center lg:justify-end lg:pr-32">
               <div className="relative w-[300px] h-[300px] sm:w-[500px] sm:h-[500px] pointer-events-auto">
-                {sessionPhotos.length === 0 && !isProcessing && (
-                   <div className="absolute inset-0 flex items-center justify-center opacity-30 -rotate-6">
-                      <p className="font-hand text-2xl sm:text-4xl text-gray-500 text-center px-4">Ready to snap?</p>
-                   </div>
-                )}
-                {sessionPhotos.map((photo) => (
-                  <div key={photo.id} className="absolute top-1/2 left-1/2 transition-all duration-700 ease-out">
+                {/* Show top 3 most recent photos scattered around */}
+                {galleryPhotos.slice(0, 3).map((photo, index) => (
+                  <div 
+                    key={photo.id} 
+                    className="absolute top-1/2 left-1/2 transition-all duration-700 ease-out"
+                    style={{ 
+                        transform: `translate(-50%, -50%) translate(${index * 20}px, ${index * 20}px) rotate(${index * 5}deg)`,
+                        zIndex: 10 - index
+                    }}
+                  >
                       <Polaroid photo={photo} />
                   </div>
                 ))}
@@ -171,21 +169,22 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Live Film Strip at Bottom (Always visible gallery) */}
-      <FilmStrip 
-        photos={galleryPhotos} 
-        onPhotoClick={() => setIsGalleryOpen(true)}
-      />
-
-      {/* View Gallery Button (Mobile friendly alternative) */}
-      <div className="absolute bottom-56 left-4 z-40 block sm:hidden">
-        <button 
-          onClick={() => setIsGalleryOpen(true)}
-          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-4 py-2 rounded-full font-bold shadow-lg hover:scale-105 transition-transform text-xs flex items-center gap-2"
-        >
-          <span>📌</span> View Gallery
-        </button>
-      </div>
+      {/* CUTE PINBOARD BUTTON */}
+      <button 
+        onClick={() => setIsGalleryOpen(true)}
+        className="absolute bottom-6 left-6 sm:bottom-10 sm:left-10 z-50 bg-[#8D6E63] hover:bg-[#795548] text-white border-[3px] sm:border-[4px] border-[#5D4037] px-4 sm:px-8 py-2 sm:py-3 rounded-full shadow-[0_4px_0_#5D4037] hover:shadow-[0_2px_0_#5D4037] hover:translate-y-[2px] active:translate-y-[4px] active:shadow-none transition-all flex items-center gap-2 sm:gap-4 group"
+      >
+         <div className="relative">
+            <div className="transform -rotate-12 text-2xl sm:text-3xl drop-shadow-sm group-hover:scale-110 transition-transform text-red-500">📌</div>
+         </div>
+         <span className="font-hand text-lg sm:text-2xl font-bold tracking-wider pt-1 shadow-sm uppercase">View Public Pinboard Gallery</span>
+         
+         {galleryPhotos.length > 0 && (
+            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs sm:text-sm font-bold rounded-full w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center border-2 border-[#5D4037] shadow-md animate-in zoom-in duration-300">
+               {galleryPhotos.length}
+            </span>
+         )}
+      </button>
 
     </div>
   );

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 
 interface RetroCameraProps {
@@ -10,6 +11,10 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [flashActive, setFlashActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  
+  // Animation state
+  const [printingPhoto, setPrintingPhoto] = useState<string | null>(null);
+  const [animatePrint, setAnimatePrint] = useState(false);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -86,91 +91,114 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
       
       // Convert to data URL
       const imageData = canvas.toDataURL('image/png');
+      
+      // Trigger Printing Animation
+      setPrintingPhoto(imageData);
+      
+      // Use double requestAnimationFrame to ensure the 'hidden' state renders before applying the transition class
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+           setAnimatePrint(true);
+        });
+      });
+
+      // Cleanup animation after it finishes
+      setTimeout(() => {
+        setAnimatePrint(false);
+        setPrintingPhoto(null);
+      }, 2500);
+
+      // Pass data up to parent
       onTakePhoto(imageData);
     }
   };
 
   return (
-    <div className="relative group select-none">
-      {/* Camera Body - Cream Color */}
-      <div className="relative w-[320px] h-[320px] bg-[#FDF6E3] rounded-[40px] shadow-2xl border-b-8 border-r-8 border-[#e6dfcc] flex items-center justify-center z-20 transform transition-transform duration-300 hover:scale-[1.02]">
+    <div className="flex flex-col items-center">
+      <div className="relative group select-none w-[320px] sm:w-[360px] mx-auto">
         
-        {/* Texture Overlay */}
-        <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/leather.png')] rounded-[40px] pointer-events-none"></div>
-
-        {/* Top Highlights */}
-        <div className="absolute top-4 left-8 w-20 h-2 bg-white/40 rounded-full blur-[1px]"></div>
-
-        {/* Flash Unit */}
-        <div className="absolute top-6 right-6 w-20 h-12 bg-[#333] rounded-lg border-4 border-[#d1c7b0] overflow-hidden shadow-inner">
-          <div className="w-full h-full bg-gradient-to-br from-gray-700 to-black relative">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.8)_0%,_transparent_60%)] opacity-50"></div>
-            <div className="absolute top-1 left-1 w-full h-[1px] bg-white/20"></div>
+        {/* Printed Photo Animation (Ejects from TOP Right) */}
+        {printingPhoto && (
+          <div 
+              className={`absolute w-[28%] aspect-[3.5/4.2] bg-[#fdfdfd] p-[2%] shadow-md transition-transform duration-[2000ms] cubic-bezier(0.25, 1, 0.5, 1) border border-gray-200
+                ${animatePrint ? '-translate-y-[130%] z-30' : 'translate-y-[10%] z-10'}
+              `}
+              style={{ top: '12%', left: '65%' }}
+          >
+              <div className="w-full h-[85%] bg-black/90 overflow-hidden filter sepia-[0.3] border border-gray-100">
+                  <img src={printingPhoto} className="w-full h-full object-cover opacity-90" alt="Printing..." />
+              </div>
           </div>
-        </div>
+        )}
 
-        {/* Viewfinder / Lens Area */}
-        <div className="relative w-48 h-48 bg-[#222] rounded-full shadow-[inset_0_4px_20px_rgba(0,0,0,0.8)] flex items-center justify-center border-[6px] border-[#dcd3be]">
-            {/* Inner Lens Ring */}
-            <div className="w-44 h-44 rounded-full border-[2px] border-[#444] flex items-center justify-center bg-[#1a1a1a] overflow-hidden relative">
-                 
-                 {/* The Actual Video Feed */}
-                 <video
+        {/* Camera Body Image - Cream Retro Style */}
+        <img 
+          src="https://www.bubbbly.com/assets/retro-camera.webp" 
+          alt="Retro Camera" 
+          className="w-full h-auto relative z-20 drop-shadow-2xl hover:scale-[1.02] transition-transform duration-300"
+        />
+
+        {/* Viewfinder / Lens Area - Adjusted for specific beige camera asset */}
+        <div className="absolute top-[27%] left-[36%] w-[45%] h-[45%] z-30 rounded-full overflow-hidden bg-[#111] shadow-inner">
+            <div className="w-full h-full relative rounded-full overflow-hidden">
+                  {/* The Actual Video Feed */}
+                  <video
                     ref={videoRef}
                     autoPlay
                     playsInline
                     muted
-                    className="w-full h-full object-cover transform scale-x-[-1] opacity-90"
-                 />
+                    className="w-full h-full object-cover transform scale-x-[-1] opacity-90 brightness-110 scale-125"
+                  />
 
-                 {/* Lens Glare Overlay */}
-                 <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/10 to-purple-500/10 rounded-full pointer-events-none mix-blend-overlay"></div>
-                 <div className="absolute top-10 left-10 w-6 h-4 bg-white/10 rounded-[50%] transform -rotate-45 blur-sm"></div>
+                  {/* Lens Glare Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/10 to-purple-500/5 pointer-events-none mix-blend-screen"></div>
+                  <div className="absolute top-1/4 left-1/4 w-1/3 h-1/3 bg-gradient-to-br from-white/30 to-transparent rounded-full blur-md opacity-50"></div>
 
-                 {/* Error Message */}
-                 {cameraError && (
-                   <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-4 text-center z-10">
-                     <p className="text-white text-xs font-bold leading-tight">{cameraError}</p>
-                     <button onClick={() => window.location.reload()} className="mt-2 text-[10px] bg-white/20 px-2 py-1 rounded">Retry</button>
-                   </div>
-                 )}
+                  {/* Error Message */}
+                  {cameraError && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-2 text-center z-40">
+                      <p className="text-white text-[10px] font-bold leading-tight mb-1">{cameraError}</p>
+                      <button onClick={() => window.location.reload()} className="text-[9px] bg-white/20 px-2 py-0.5 rounded text-white hover:bg-white/30">Retry</button>
+                    </div>
+                  )}
             </div>
         </div>
 
-        {/* Shutter Button */}
+        {/* Shutter Button - Styled to match the reference pink button */}
         <button
           onClick={handleShutter}
           disabled={isProcessing || !!cameraError}
-          className={`absolute bottom-6 right-6 w-16 h-16 rounded-full border-4 border-[#dcd3be] shadow-[0_4px_0_#cbbca0] active:shadow-none active:translate-y-[4px] transition-all flex items-center justify-center
-            ${isProcessing ? 'bg-gray-300 cursor-wait' : 'bg-[#FF6B6B] hover:bg-[#ff5252] cursor-pointer'}
+          className={`absolute top-[44%] left-[14%] z-40 w-[13%] h-[13%] rounded-full 
+            group cursor-pointer transition-transform active:scale-95 flex items-center justify-center
+            ${isProcessing ? 'cursor-wait' : ''}
           `}
+          title="Snap Photo"
+          aria-label="Take Photo"
         >
-          <div className="w-12 h-12 rounded-full border-2 border-white/20 bg-gradient-to-br from-white/30 to-transparent"></div>
+           {/* Visual styling for the pink button */}
+           <div className="w-full h-full rounded-full bg-black/20 shadow-inner flex items-center justify-center">
+               <div className={`w-[85%] h-[85%] rounded-full bg-[#D8B4A8] shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),0_2px_4px_rgba(0,0,0,0.2)] border border-[#C09E92] 
+                  group-hover:bg-[#E6C0B0] transition-colors
+                  ${isProcessing ? 'animate-pulse bg-red-400/50' : ''}
+               `}></div>
+           </div>
         </button>
+        
+        {/* Flash Overlay (Whole Screen) */}
+        {flashActive && (
+          <div className="fixed inset-0 bg-white z-[100] animate-out fade-out duration-300 pointer-events-none"></div>
+        )}
 
-        {/* Power Indicator */}
-        <div className="absolute bottom-8 left-10 w-3 h-3 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80] animate-pulse"></div>
-
-        {/* Branding */}
-        <div className="absolute bottom-6 left-16">
-             <span className="font-bold text-[#8b816a] tracking-widest text-xs opacity-70">RETRO-CAM</span>
-        </div>
+        {/* Hidden Canvas for Capture */}
+        <canvas ref={canvasRef} className="hidden" />
+        
+        {/* Processing Indicator */}
+        {isProcessing && (
+          <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-full shadow-lg z-50 animate-bounce">
+            <span className="text-sm font-bold text-gray-600 whitespace-nowrap">Developing... 🎞️</span>
+          </div>
+        )}
       </div>
-
-      {/* Flash Overlay (Whole Screen) */}
-      {flashActive && (
-        <div className="fixed inset-0 bg-white z-50 animate-out fade-out duration-300 pointer-events-none"></div>
-      )}
-
-      {/* Hidden Canvas for Capture */}
-      <canvas ref={canvasRef} className="hidden" />
-      
-      {/* Processing Indicator */}
-      {isProcessing && (
-        <div className="absolute top-[-60px] left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-full shadow-lg z-30 animate-bounce">
-           <span className="text-sm font-bold text-gray-600">Developing photo... ✨</span>
-        </div>
-      )}
     </div>
   );
 };
