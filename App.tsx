@@ -99,6 +99,7 @@ const App: React.FC = () => {
 
   const handleClearGallery = async () => {
      setGalleryPhotos([]);
+     // We await here so the modal in PinboardGallery shows the loading spinner until done
      await clearAllPhotos();
   };
   

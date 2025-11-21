@@ -9,7 +9,7 @@ interface PinboardGalleryProps {
   photos: PhotoData[];
   onDeletePhoto: (id: string) => void;
   onRefresh?: () => Promise<void>;
-  onClear?: () => void;
+  onClear?: () => Promise<void>;
 }
 
 export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClose, photos, onDeletePhoto, onRefresh, onClear }) => {
@@ -19,6 +19,7 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
   
   // Custom Confirmation State
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   
   const startY = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -29,6 +30,7 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
         setPullY(0);
         setIsRefreshing(false);
         setShowClearConfirm(false);
+        setIsClearing(false);
     }
   }, [isOpen]);
 
@@ -88,9 +90,11 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
      setShowClearConfirm(true);
   };
 
-  const confirmClear = () => {
+  const confirmClear = async () => {
       if (onClear) {
-          onClear();
+          setIsClearing(true);
+          await onClear();
+          setIsClearing(false);
       }
       setShowClearConfirm(false);
   };
@@ -215,20 +219,28 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
                     <p className="text-gray-600 mb-6 font-hand text-lg leading-tight">
                         This will permanently delete ALL photos for everyone. This action cannot be undone.
                     </p>
-                    <div className="flex gap-3 justify-center">
-                        <button 
-                            onClick={() => setShowClearConfirm(false)}
-                            className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-full font-bold text-gray-700 transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={confirmClear}
-                            className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-full font-bold text-white shadow-md transition-colors"
-                        >
-                            Yes, Delete All
-                        </button>
-                    </div>
+                    
+                    {isClearing ? (
+                         <div className="flex flex-col items-center justify-center py-2">
+                             <div className="w-8 h-8 border-4 border-[#5d4037] border-t-transparent rounded-full animate-spin mb-2"></div>
+                             <span className="font-hand font-bold text-[#5d4037]">Deleting...</span>
+                         </div>
+                    ) : (
+                        <div className="flex gap-3 justify-center">
+                            <button 
+                                onClick={() => setShowClearConfirm(false)}
+                                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-full font-bold text-gray-700 transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={confirmClear}
+                                className="px-4 py-2 bg-red-500 hover:bg-red-600 rounded-full font-bold text-white shadow-md transition-colors"
+                            >
+                                Yes, Delete All
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
         )}

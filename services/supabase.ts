@@ -6,21 +6,10 @@ import { PhotoData } from '../types';
    ===========================================================================
    ⚡️ SUPABASE SETUP INSTRUCTIONS (REQUIRED FOR REALTIME SYNC) ⚡️
    
-   If you see "Could not find the 'caption' column" errors, your table is missing fields.
-   RUN THIS SQL IN YOUR SUPABASE DASHBOARD > SQL EDITOR TO FIX IT:
+   Run this SQL in your Supabase Dashboard > SQL Editor:
 
    ----------------------------------------------------------------
-   -- 1. Fix Missing Columns (Run this if table already exists)
-   ----------------------------------------------------------------
-   alter table photos add column if not exists caption text;
-   alter table photos add column if not exists date text;
-   alter table photos add column if not exists rotation numeric;
-   alter table photos add column if not exists z_index numeric;
-   alter table photos add column if not exists x numeric;
-   alter table photos add column if not exists y numeric;
-
-   ----------------------------------------------------------------
-   -- 2. Create Table (If you haven't created it yet)
+   -- 1. Create Table
    ----------------------------------------------------------------
    create table if not exists photos (
      id uuid primary key,
@@ -35,21 +24,31 @@ import { PhotoData } from '../types';
    );
 
    ----------------------------------------------------------------
-   -- 3. Enable Realtime & Permissions
+   -- 2. Enable Realtime
    ----------------------------------------------------------------
    alter publication supabase_realtime add table photos;
    
+   ----------------------------------------------------------------
+   -- 3. Policies (Allow Public Read/Write/Delete)
+   ----------------------------------------------------------------
    alter table photos enable row level security;
+   
+   -- Allow INSERT/SELECT
    create policy "Public view" on photos for select to anon using (true);
    create policy "Public insert" on photos for insert to anon with check (true);
+   
+   -- Allow DELETE (Required for 'Clear Gallery' to work)
    create policy "Public delete" on photos for delete to anon using (true);
 
    ----------------------------------------------------------------
-   -- 4. Create Storage Bucket
+   -- 4. Storage Bucket
    ----------------------------------------------------------------
-   insert into storage.buckets (id, name, public) values ('retro-uploads', 'retro-uploads', true);
+   insert into storage.buckets (id, name, public) values ('retro-uploads', 'retro-uploads', true)
+   on conflict (id) do nothing;
+   
    create policy "Public Access" on storage.objects for select to public using ( bucket_id = 'retro-uploads' );
    create policy "Public Upload" on storage.objects for insert to public with check ( bucket_id = 'retro-uploads' );
+   create policy "Public Delete" on storage.objects for delete to public using ( bucket_id = 'retro-uploads' );
    ===========================================================================
 */
 
@@ -240,13 +239,32 @@ export const clearAllPhotos = async () => {
 
   try {
     // 2. Wipe DB
-    // Deleting where ID is not '000...000' effectively deletes all rows
-    const { error } = await supabase.from('photos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (error) {
-        console.warn("Failed to clear remote DB (RLS might restrict this):", error.message);
+    // Strategy: Fetch all IDs first, then delete by ID list.
+    // This is safer than bulk delete commands which are often blocked by default RLS.
+    const { data: photos, error: fetchError } = await supabase.from('photos').select('id');
+    
+    if (fetchError) throw fetchError;
+
+    if (photos && photos.length > 0) {
+        const ids = photos.map(p => p.id);
+        const storagePaths = ids.map(id => `public/${id}.jpg`);
+
+        // Delete Rows
+        const { error: deleteError } = await supabase.from('photos').delete().in('id', ids);
+        if (deleteError) {
+             console.warn("Failed to delete rows from DB (Check RLS policies):", deleteError.message);
+        } else {
+            console.log(`✅ Deleted ${ids.length} photos from DB`);
+        }
+
+        // Delete Storage Files (Best effort)
+        if (storagePaths.length > 0) {
+            const { error: storageError } = await supabase.storage.from('retro-uploads').remove(storagePaths);
+            if (storageError) console.warn("Storage cleanup warning:", storageError.message);
+        }
     }
-  } catch (e) {
-      console.error("Clear gallery failed:", e);
+  } catch (e: any) {
+      console.error("Clear gallery failed:", e.message);
   }
 };
 
