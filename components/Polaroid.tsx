@@ -4,32 +4,47 @@ import { PhotoData } from '../types';
 interface PolaroidProps {
   photo: PhotoData;
   onClick?: () => void;
-  variant?: 'scattered' | 'grid';
+  variant?: 'scattered' | 'grid' | 'filmstrip';
   onDelete?: () => void;
 }
 
 export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 'scattered', onDelete }) => {
   const isScattered = variant === 'scattered';
+  const isFilmstrip = variant === 'filmstrip';
+
+  // Inline styles for positioning
+  let style = {};
+  if (isScattered) {
+    style = {
+      transform: `rotate(${photo.rotation}deg) translate(${photo.x || 0}px, ${photo.y || 0}px)`,
+      zIndex: photo.zIndex,
+    };
+  } else if (isFilmstrip) {
+    style = {
+      transform: 'none', // No rotation in film strip
+    };
+  } else {
+    // Grid
+    style = {
+      transform: `rotate(${photo.rotation % 6 - 3}deg)`,
+    };
+  }
+
+  // Classes for container
+  let containerClasses = "group relative transition-all duration-500 bg-white rounded-[2px] select-none";
+  
+  if (isScattered) {
+    containerClasses += " shadow-[0_10px_20px_rgba(0,0,0,0.15)] absolute hover:scale-110 hover:z-50 w-64 sm:w-72 pb-12 p-4 cursor-pointer";
+  } else if (isFilmstrip) {
+    containerClasses += " w-[120px] h-[160px] p-2 pb-6 shrink-0 hover:scale-105 cursor-pointer shadow-md mx-2";
+  } else {
+    containerClasses += " shadow-[0_10px_20px_rgba(0,0,0,0.15)] relative hover:scale-105 hover:shadow-xl w-[150px] xs:w-[170px] sm:w-60 mb-8 sm:mb-12 mx-1 sm:mx-4 pb-8 sm:pb-12 p-3 sm:p-4";
+  }
 
   return (
-    <div
-      onClick={onClick}
-      style={{
-        transform: isScattered 
-          ? `rotate(${photo.rotation}deg) translate(${photo.x || 0}px, ${photo.y || 0}px)`
-          : `rotate(${photo.rotation % 6 - 3}deg)`, 
-        zIndex: isScattered ? photo.zIndex : undefined,
-      }}
-      className={`
-        group relative transition-all duration-500 bg-white shadow-[0_10px_20px_rgba(0,0,0,0.15)] rounded-[2px] select-none
-        ${isScattered 
-          ? 'absolute hover:scale-110 hover:z-50 w-64 sm:w-72 pb-12 p-4 cursor-pointer' 
-          : 'relative hover:scale-105 hover:shadow-xl w-[150px] xs:w-[170px] sm:w-60 mb-8 sm:mb-12 mx-1 sm:mx-4 pb-8 sm:pb-12 p-3 sm:p-4'
-        }
-      `}
-    >
-      {/* Delete Button - Optimized for reliable clicking */}
-      {onDelete && (
+    <div onClick={onClick} style={style} className={containerClasses}>
+      {/* Delete Button (Only show if handler provided and NOT in filmstrip mode usually, but optional) */}
+      {onDelete && !isFilmstrip && (
         <div 
             className="absolute -top-4 -right-4 z-[100] w-12 h-12 flex items-center justify-center cursor-pointer pointer-events-auto"
             onClick={(e) => {
@@ -50,7 +65,7 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
       )}
 
       {/* Photo Area */}
-      <div className="w-full aspect-square bg-gray-900 overflow-hidden mb-3 sm:mb-4 border border-gray-100 filter sepia-[0.3] contrast-[1.1]">
+      <div className={`w-full aspect-square bg-gray-900 overflow-hidden border border-gray-100 filter sepia-[0.3] contrast-[1.1] ${isFilmstrip ? 'mb-2' : 'mb-3 sm:mb-4'}`}>
         <img
           src={photo.imageUrl}
           alt={photo.caption}
@@ -63,12 +78,14 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
 
       {/* Caption Area */}
       <div className="text-center transform -rotate-1">
-        <p className={`font-hand text-gray-800 leading-tight mb-1 truncate px-1 ${isScattered ? 'text-xl' : 'text-sm xs:text-base sm:text-xl'}`}>
+        <p className={`font-hand text-gray-800 leading-tight truncate px-1 ${isScattered ? 'text-xl mb-1' : isFilmstrip ? 'text-[10px] mb-0' : 'text-sm xs:text-base sm:text-xl mb-1'}`}>
           {photo.caption}
         </p>
-        <p className={`font-hand text-gray-400 tracking-widest ${isScattered ? 'text-sm' : 'text-[10px] sm:text-sm'}`}>
-          {photo.date}
-        </p>
+        {!isFilmstrip && (
+          <p className={`font-hand text-gray-400 tracking-widest ${isScattered ? 'text-sm' : 'text-[10px] sm:text-sm'}`}>
+            {photo.date}
+          </p>
+        )}
       </div>
       
       {/* Texture details */}

@@ -8,7 +8,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const LOCAL_BACKUP_KEY = 'retro_snap_backup_gallery';
 
-// Helper to get local backup
+// --- Local Storage Fallbacks ---
 const getLocalBackup = (): PhotoData[] => {
   try {
     const stored = localStorage.getItem(LOCAL_BACKUP_KEY);
@@ -18,11 +18,13 @@ const getLocalBackup = (): PhotoData[] => {
   }
 };
 
-// Helper to save to local backup
 const saveLocalBackup = (photo: PhotoData) => {
   const current = getLocalBackup();
-  const updated = [photo, ...current];
-  localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(updated));
+  // Avoid duplicates
+  if (!current.find(p => p.id === photo.id)) {
+    const updated = [photo, ...current];
+    localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(updated));
+  }
 };
 
 const deleteLocalBackup = (id: string) => {
@@ -33,7 +35,6 @@ const deleteLocalBackup = (id: string) => {
 
 // Helper to convert base64 to Blob for upload
 const base64ToBlob = (base64: string, mimeType: string = 'image/png') => {
-  // Handle data URI prefix if present
   const byteString = atob(base64.includes(',') ? base64.split(',')[1] : base64);
   const ab = new ArrayBuffer(byteString.length);
   const ia = new Uint8Array(ab);
@@ -43,21 +44,23 @@ const base64ToBlob = (base64: string, mimeType: string = 'image/png') => {
   return new Blob([ab], { type: mimeType });
 };
 
+// --- Public API ---
+
 export const uploadPhotoToSupabase = async (base64Image: string, filename: string): Promise<string | null> => {
   try {
     const blob = base64ToBlob(base64Image);
     
-    // Try to upload to 'retro-uploads' bucket
-    const { data, error } = await supabase.storage
+    // Upload to 'retro-uploads' bucket
+    const { error: uploadError } = await supabase.storage
       .from('retro-uploads') 
       .upload(`public/${filename}.png`, blob, {
         contentType: 'image/png',
         upsert: true
       });
 
-    if (error) {
+    if (uploadError) {
       console.warn("Supabase Storage Upload failed (Bucket likely missing). Using Base64 fallback.");
-      // FALLBACK: Return the base64 string directly. 
+      // If bucket doesn't exist, just return the base64 so the app still works visually
       return base64Image;
     }
 
@@ -67,20 +70,21 @@ export const uploadPhotoToSupabase = async (base64Image: string, filename: strin
 
     return publicUrl;
   } catch (e) {
-    console.warn("Storage exception, falling back to base64:", e);
+    console.warn("Storage exception, falling back to base64.", e);
     return base64Image;
   }
 };
 
 export const savePhotoToDB = async (photo: PhotoData): Promise<boolean> => {
   try {
-    // Mapping camelCase to snake_case for DB
+    // Ensure we use snake_case for DB columns if that's how the table is set up,
+    // but based on standard setup, we map carefully.
     const { error } = await supabase
       .from('photos')
       .insert([
         {
           id: photo.id,
-          image_url: photo.imageUrl,
+          image_url: photo.imageUrl, // Ensure your DB column is image_url
           caption: photo.caption,
           date: photo.date,
           rotation: photo.rotation,
@@ -92,10 +96,10 @@ export const savePhotoToDB = async (photo: PhotoData): Promise<boolean> => {
       ]);
 
     if (error) {
-        // Error 42P01 means table doesn't exist
-        console.warn("Supabase DB Insert Failed (likely missing table 'photos'). Saving to LocalStorage instead.", error.message);
+        console.error("Supabase DB Insert Failed:", error.message);
+        // Save locally if cloud fails
         saveLocalBackup(photo);
-        return false; // return false to indicate cloud failure
+        return false;
     }
     return true;
   } catch (e) {
@@ -107,7 +111,6 @@ export const savePhotoToDB = async (photo: PhotoData): Promise<boolean> => {
 
 export const deletePhotoFromSupabase = async (id: string) => {
   try {
-    // 1. Try Delete from DB
     const { error: dbError } = await supabase
       .from('photos')
       .delete()
@@ -118,12 +121,10 @@ export const deletePhotoFromSupabase = async (id: string) => {
         deleteLocalBackup(id);
     }
 
-    // 2. Delete from Storage (fire and forget)
-    try {
-      await supabase.storage
-        .from('retro-uploads')
-        .remove([`public/${id}.png`]);
-    } catch (e) {}
+    // Attempt storage delete (fire and forget)
+    supabase.storage
+      .from('retro-uploads')
+      .remove([`public/${id}.png`]).then(() => {});
 
   } catch (e) {
     deleteLocalBackup(id);
@@ -131,28 +132,29 @@ export const deletePhotoFromSupabase = async (id: string) => {
 };
 
 export const subscribeToPhotos = (onUpdate: (photos: PhotoData[]) => void) => {
-  let usedFallback = false;
+  let isCloudWorking = true;
 
-  // Fetch initial data
+  // Initial Fetch
   const fetchPhotos = async () => {
     const { data, error } = await supabase
       .from('photos')
       .select('*')
-      .order('timestamp', { ascending: false });
+      .order('timestamp', { ascending: false })
+      .limit(50); // Limit to last 50 for performance
     
     if (error) {
-        console.warn("Supabase Fetch Failed (likely missing table). Loading Local Backup.");
-        usedFallback = true;
+        console.warn("Supabase Fetch Failed. Loading Local Backup.");
+        isCloudWorking = false;
         const localPhotos = getLocalBackup();
-        onUpdate(localPhotos);
+        // Sort local photos by timestamp desc
+        onUpdate(localPhotos.sort((a, b) => b.timestamp - a.timestamp));
         return;
     }
 
     if (data) {
-      // Map snake_case back to camelCase
       const mappedPhotos: PhotoData[] = data.map((row: any) => ({
         id: row.id,
-        imageUrl: row.image_url,
+        imageUrl: row.image_url, // DB column snake_case -> camelCase
         caption: row.caption,
         date: row.date,
         rotation: row.rotation,
@@ -167,15 +169,20 @@ export const subscribeToPhotos = (onUpdate: (photos: PhotoData[]) => void) => {
 
   fetchPhotos();
 
-  // Realtime subscription
+  // Realtime Subscription
   const channel = supabase
     .channel('public:photos')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'photos' }, () => {
-      if (!usedFallback) {
-        fetchPhotos(); // Refresh list on any change
-      }
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'photos' }, (payload) => {
+       console.log('Realtime update received!', payload);
+       if (isCloudWorking) {
+         fetchPhotos(); 
+       }
     })
-    .subscribe();
+    .subscribe((status) => {
+       if (status === 'SUBSCRIBED') {
+         console.log('Connected to Supabase Realtime');
+       }
+    });
 
   return () => {
     supabase.removeChannel(channel);

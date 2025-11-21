@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { RetroCamera } from './components/RetroCamera';
 import { Polaroid } from './components/Polaroid';
 import { PinboardGallery } from './components/PinboardGallery';
+import { FilmStrip } from './components/FilmStrip';
 import { PhotoData } from './types';
 import { generatePhotoCaption } from './services/geminiService';
 import { 
@@ -25,7 +26,6 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = subscribeToPhotos((updatedPhotos) => {
       setGalleryPhotos(updatedPhotos);
-      // If we got photos, assume connection is okay-ish, or we are using local fallback
     });
     return () => unsubscribe();
   }, []);
@@ -40,7 +40,8 @@ const App: React.FC = () => {
       // 1. Generate caption using Gemini
       const aiData = await generatePhotoCaption(imageData);
 
-      // 2. Upload image to Supabase Storage (or fallback to base64)
+      // 2. Upload image to Supabase Storage
+      // If bucket is missing, it falls back to returning the base64 string so user experience is uninterrupted
       const publicUrl = await uploadPhotoToSupabase(imageData, photoId);
       
       if (!publicUrl) throw new Error("Failed to process image data");
@@ -64,9 +65,9 @@ const App: React.FC = () => {
       const savedToCloud = await savePhotoToDB(newPhoto);
 
       if (!savedToCloud) {
-          // Fallback: If cloud failed (e.g. missing table), manually add to gallery view
-          // so the user sees it immediately.
+          // Fallback UI indicator if cloud save failed
           setIsCloudConnected(false);
+          // We still add it to the gallery view locally so the user sees it
           setGalleryPhotos((prev) => [newPhoto, ...prev]);
       } else {
           setIsCloudConnected(true);
@@ -97,14 +98,12 @@ const App: React.FC = () => {
   };
 
   const handleDeletePhoto = async (id: string) => {
-    // Delete from Supabase (DB & Storage) or LocalStorage Fallback
-    await deletePhotoFromSupabase(id);
-    
-    // Remove from local session state if present
+    // Optimistic update
+    setGalleryPhotos((prev) => prev.filter((p) => p.id !== id));
     setSessionPhotos((prev) => prev.filter((p) => p.id !== id));
     
-    // Manually update gallery state just in case realtime/fallback doesn't trigger instantly
-    setGalleryPhotos((prev) => prev.filter((p) => p.id !== id));
+    // Perform actual delete
+    await deletePhotoFromSupabase(id);
   };
 
   return (
@@ -124,7 +123,7 @@ const App: React.FC = () => {
            <div className="bg-white/80 backdrop-blur px-3 py-1 rounded-full border border-gray-200 shadow-sm flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></div>
               <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                {isCloudConnected ? 'SUPABASE LIVE' : 'LOCAL MODE'}
+                {isCloudConnected ? 'Supabase Live' : 'Local Mode'}
               </span>
            </div>
         </div>
@@ -147,14 +146,14 @@ const App: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 relative flex items-center justify-center lg:justify-start lg:pl-32">
+      <div className="flex-1 relative flex items-center justify-center lg:justify-start lg:pl-32 pb-48">
         
         {/* Camera Container */}
         <div className="relative z-40 scale-[0.65] xs:scale-75 sm:scale-100 transition-transform">
            <RetroCamera onTakePhoto={handleTakePhoto} isProcessing={isProcessing} />
         </div>
 
-        {/* Photo Gallery Area - Scattered on the right */}
+        {/* Photo Gallery Area - Scattered on the right (Session Only) */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
            <div className="relative w-full h-full flex items-center justify-center lg:justify-end lg:pr-32">
               <div className="relative w-[300px] h-[300px] sm:w-[500px] sm:h-[500px] pointer-events-auto">
@@ -171,26 +170,22 @@ const App: React.FC = () => {
               </div>
            </div>
         </div>
-
       </div>
 
-      {/* Bottom Left Action */}
-      <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 z-50 flex items-end gap-2">
+      {/* Live Film Strip at Bottom */}
+      <FilmStrip 
+        photos={galleryPhotos} 
+        onPhotoClick={() => setIsGalleryOpen(true)}
+      />
+
+      {/* Gallery Button (Alternative access) */}
+      <div className="absolute bottom-56 left-4 z-40 hidden sm:block">
         <button 
           onClick={() => setIsGalleryOpen(true)}
-          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-3 py-2 sm:px-5 sm:py-3 rounded-xl font-bold shadow-[3px_3px_0px_0px_#3E2723] sm:shadow-[4px_4px_0px_0px_#3E2723] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_#3E2723] transition-all flex items-center gap-2 text-xs sm:text-sm group"
+          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-4 py-2 rounded-full font-bold shadow-lg hover:scale-105 transition-transform text-xs"
         >
-          <span className="text-lg group-hover:rotate-12 transition-transform">📌</span> 
-          <span className="hidden xs:inline">View Global Gallery</span>
-          <span className="xs:hidden">Gallery</span>
-          <span className="bg-[#5D4037] px-2 py-0.5 rounded-full text-[10px] ml-1">{galleryPhotos.length}</span>
+          View Full Pinboard
         </button>
-      </div>
-
-      {/* Footer/Hint */}
-      <div className="absolute bottom-6 right-6 z-40 text-right opacity-60 pointer-events-none hidden md:block">
-        <p className="font-hand text-sm font-bold text-gray-600 uppercase tracking-wide">Use once to capture your day</p>
-        <p className="font-hand text-xs text-gray-500">through everyone's eyes →</p>
       </div>
 
     </div>
