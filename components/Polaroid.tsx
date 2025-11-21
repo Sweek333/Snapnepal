@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { PhotoData } from '../types';
 
@@ -38,7 +39,8 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
   } else if (isFilmstrip) {
     containerClasses += " w-[130px] h-[160px] p-2 pb-6 shrink-0 hover:scale-105 cursor-pointer shadow-md mx-2 border border-gray-200 bg-[#fdfdfd]";
   } else {
-    containerClasses += " shadow-[0_10px_20px_rgba(0,0,0,0.15)] relative hover:scale-105 hover:shadow-xl w-[150px] xs:w-[170px] sm:w-60 mb-8 sm:mb-12 mx-1 sm:mx-4 pb-8 sm:pb-12 p-3 sm:p-4";
+    // Grid - Added hover:z-50 to pop above neighbors
+    containerClasses += " shadow-[0_10px_20px_rgba(0,0,0,0.15)] relative hover:scale-105 hover:shadow-xl hover:z-50 w-[150px] xs:w-[170px] sm:w-60 mb-8 sm:mb-12 mx-1 sm:mx-4 pb-8 sm:pb-12 p-3 sm:p-4";
   }
 
   return (
@@ -46,7 +48,7 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
       {/* Delete Button (Only show if handler provided and NOT in filmstrip mode) */}
       {onDelete && !isFilmstrip && (
         <div 
-            className="absolute -top-4 -right-4 z-[100] w-12 h-12 flex items-center justify-center cursor-pointer pointer-events-auto"
+            className="absolute -top-3 -right-3 z-[100] w-12 h-12 flex items-center justify-center cursor-pointer pointer-events-auto touch-manipulation"
             onClick={(e) => {
                 e.stopPropagation();
                 e.nativeEvent.stopImmediatePropagation();

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { PhotoData } from '../types';
 import { Polaroid } from './Polaroid';
@@ -52,7 +53,7 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
                  </div>
               ) : (
                 photos.slice().reverse().map((photo) => (
-                   <div key={photo.id} className="relative pt-3 sm:pt-4 px-1">
+                   <div key={photo.id} className="relative pt-3 sm:pt-4 px-1 hover:z-50 transition-all duration-200 group/pin">
                       {/* Pin graphic - Scaled for mobile. Low z-index to not block touches if overlap occurs */}
                       <div className="absolute top-1.5 sm:top-2 left-1/2 transform -translate-x-1/2 z-20 w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-red-500 shadow-[2px_2px_4px_rgba(0,0,0,0.4)] border border-red-700 flex items-center justify-center pointer-events-none">
                          <div className="w-0.5 h-0.5 sm:w-1 sm:h-1 bg-red-300 rounded-full opacity-50"></div>
