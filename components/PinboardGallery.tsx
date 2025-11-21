@@ -24,11 +24,11 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
         <div className="relative z-10 bg-[#795548] p-3 sm:p-4 shadow-[0_4px_6px_rgba(0,0,0,0.1)] flex justify-between items-center border-b-4 border-[#5d4037]">
           <div className="flex items-center gap-2 sm:gap-3">
             <span className="text-xl sm:text-2xl">📌</span>
-            <h2 className="font-hand text-xl sm:text-3xl text-white font-bold tracking-widest drop-shadow-md">Public Pinboard</h2>
+            <h2 className="font-hand text-xl sm:text-3xl text-white font-bold tracking-widest drop-shadow-md">Our Pinboard</h2>
           </div>
           <div className="flex items-center gap-2">
              <div className="text-white/60 text-[10px] sm:text-xs font-hand mr-2 hidden sm:block">
-                Memories fade after 24h
+                Memories are forever ✨
              </div>
              <button 
                 onClick={onClose} 
@@ -48,7 +48,7 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
                         <span className="text-2xl sm:text-4xl">📷</span>
                     </div>
                     <p className="font-hand text-xl sm:text-3xl text-[#5d4037]">Gallery is empty...</p>
-                    <p className="font-hand text-lg sm:text-xl text-[#5d4037] mt-2">Snap a photo to share it with everyone!</p>
+                    <p className="font-hand text-lg sm:text-xl text-[#5d4037] mt-2">Snap a photo to leave your mark!</p>
                  </div>
               ) : (
                 photos.slice().reverse().map((photo) => (

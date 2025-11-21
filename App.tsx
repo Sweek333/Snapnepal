@@ -22,27 +22,20 @@ const App: React.FC = () => {
     // Initialize BroadcastChannel
     syncChannel.current = new BroadcastChannel('retro_snap_sync');
 
-    const loadAndCleanGallery = () => {
+    const loadGallery = () => {
       const savedPhotos = localStorage.getItem('retro-snap-gallery');
       if (savedPhotos) {
         try {
           const parsed: PhotoData[] = JSON.parse(savedPhotos);
-          const now = Date.now();
-          const twentyFourHoursMs = 24 * 60 * 60 * 1000;
-
-          const validPhotos = parsed.filter(p => {
-              // If legacy photo (no timestamp), keep it
-              if (!p.timestamp) return true;
-              // Check if photo is older than 24 hours
-              return (now - p.timestamp) < twentyFourHoursMs;
-          });
-
-          // Update storage if we cleaned up
-          if (validPhotos.length !== parsed.length) {
-              localStorage.setItem('retro-snap-gallery', JSON.stringify(validPhotos));
-          }
           
-          setGalleryPhotos(validPhotos);
+          // Sort by timestamp if available, otherwise keep order
+          const sortedPhotos = parsed.sort((a, b) => {
+             const tA = a.timestamp || 0;
+             const tB = b.timestamp || 0;
+             return tA - tB;
+          });
+          
+          setGalleryPhotos(sortedPhotos);
         } catch (e) {
           console.error("Failed to load gallery photos", e);
         }
@@ -50,17 +43,17 @@ const App: React.FC = () => {
     };
 
     // Initial load
-    loadAndCleanGallery();
+    loadGallery();
 
     // Listen for updates from other tabs (BroadcastChannel)
     syncChannel.current.onmessage = () => {
-        loadAndCleanGallery();
+        loadGallery();
     };
 
     // Listen for storage events (fallback for some browsers)
     const handleStorageChange = (e: StorageEvent) => {
         if (e.key === 'retro-snap-gallery') {
-            loadAndCleanGallery();
+            loadGallery();
         }
     };
     window.addEventListener('storage', handleStorageChange);
@@ -88,7 +81,7 @@ const App: React.FC = () => {
         // Tighter spread to ensure visibility on all screens
         x: randomRange(-40, 40), 
         y: randomRange(-40, 40),
-        timestamp: Date.now(), // Add timestamp for expiration
+        timestamp: Date.now(),
       };
 
       // Add to current session (scattered view)
@@ -213,7 +206,7 @@ const App: React.FC = () => {
           className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-3 py-2 sm:px-5 sm:py-3 rounded-xl font-bold shadow-[3px_3px_0px_0px_#3E2723] sm:shadow-[4px_4px_0px_0px_#3E2723] hover:translate-y-[1px] hover:shadow-[3px_3px_0px_0px_#3E2723] transition-all flex items-center gap-2 text-xs sm:text-sm group"
         >
           <span className="text-lg group-hover:rotate-12 transition-transform">📌</span> 
-          <span className="hidden xs:inline">View Public Pinboard Gallery</span>
+          <span className="hidden xs:inline">View Pinboard Gallery</span>
           <span className="xs:hidden">Gallery</span>
           <span className="bg-[#5D4037] px-2 py-0.5 rounded-full text-[10px] ml-1">{galleryPhotos.length}</span>
         </button>
