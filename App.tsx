@@ -96,7 +96,7 @@ const App: React.FC = () => {
         const photo = galleryPhotos[0];
         const link = document.createElement('a');
         link.href = photo.imageUrl;
-        link.download = `retro-${photo.id}.png`;
+        link.download = `retro-${photo.id}.jpg`;
         link.click();
     }
   };

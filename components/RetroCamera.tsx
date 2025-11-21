@@ -89,8 +89,8 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
       
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       
-      // Convert to data URL
-      const imageData = canvas.toDataURL('image/png');
+      // Convert to data URL - USE JPEG COMPRESSION TO REDUCE SIZE FOR SYNC
+      const imageData = canvas.toDataURL('image/jpeg', 0.7);
       
       // Trigger Printing Animation
       setPrintingPhoto(imageData);
@@ -123,7 +123,7 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
               className={`absolute w-[28%] aspect-[3.5/4.2] bg-[#fdfdfd] p-[2%] shadow-md transition-transform duration-[2000ms] cubic-bezier(0.25, 1, 0.5, 1) border border-gray-200
                 ${animatePrint ? '-translate-y-[130%] z-30' : 'translate-y-[10%] z-10'}
               `}
-              style={{ top: '12%', left: '65%' }}
+              style={{ top: '12%', left: '70%' }}
           >
               <div className="w-full h-[85%] bg-black/90 overflow-hidden filter sepia-[0.3] border border-gray-100">
                   <img src={printingPhoto} className="w-full h-full object-cover opacity-90" alt="Printing..." />
@@ -139,7 +139,7 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
         />
 
         {/* Viewfinder / Lens Area - Adjusted for specific beige camera asset */}
-        <div className="absolute top-[27%] left-[36%] w-[45%] h-[45%] z-30 rounded-full overflow-hidden bg-[#111] shadow-inner">
+        <div className="absolute top-[26.5%] left-[31%] w-[41.5%] h-[41.5%] z-30 rounded-full overflow-hidden bg-[#111] shadow-inner">
             <div className="w-full h-full relative rounded-full overflow-hidden">
                   {/* The Actual Video Feed */}
                   <video
@@ -164,11 +164,11 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
             </div>
         </div>
 
-        {/* Shutter Button - Styled to match the reference pink button */}
+        {/* Shutter Button - Styled to match the physical button */}
         <button
           onClick={handleShutter}
           disabled={isProcessing || !!cameraError}
-          className={`absolute top-[44%] left-[14%] z-40 w-[13%] h-[13%] rounded-full 
+          className={`absolute top-[43%] left-[12.5%] z-40 w-[15%] h-[15%] rounded-full 
             group cursor-pointer transition-transform active:scale-95 flex items-center justify-center
             ${isProcessing ? 'cursor-wait' : ''}
           `}
@@ -176,9 +176,9 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
           aria-label="Take Photo"
         >
            {/* Visual styling for the pink button */}
-           <div className="w-full h-full rounded-full bg-black/20 shadow-inner flex items-center justify-center">
-               <div className={`w-[85%] h-[85%] rounded-full bg-[#D8B4A8] shadow-[inset_0_2px_4px_rgba(255,255,255,0.3),0_2px_4px_rgba(0,0,0,0.2)] border border-[#C09E92] 
-                  group-hover:bg-[#E6C0B0] transition-colors
+           <div className="w-full h-full rounded-full bg-black/10 shadow-inner flex items-center justify-center">
+               <div className={`w-[90%] h-[90%] rounded-full bg-[#E6C6BA] shadow-[inset_0_2px_4px_rgba(255,255,255,0.4),0_2px_4px_rgba(0,0,0,0.3)] border border-[#C09E92] 
+                  group-hover:bg-[#f0d4c8] transition-colors
                   ${isProcessing ? 'animate-pulse bg-red-400/50' : ''}
                `}></div>
            </div>

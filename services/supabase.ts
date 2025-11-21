@@ -6,34 +6,50 @@ import { PhotoData } from '../types';
    ===========================================================================
    ⚡️ SUPABASE SETUP INSTRUCTIONS (REQUIRED FOR REALTIME SYNC) ⚡️
    
-   If you see "Could not find the table" errors, run this SQL in your Supabase Dashboard:
+   If you see "Could not find the 'caption' column" errors, your table is missing fields.
+   RUN THIS SQL IN YOUR SUPABASE DASHBOARD > SQL EDITOR TO FIX IT:
+
+   ----------------------------------------------------------------
+   -- 1. Fix Missing Columns (Run this if table already exists)
+   ----------------------------------------------------------------
+   alter table photos add column if not exists caption text;
+   alter table photos add column if not exists date text;
+   alter table photos add column if not exists rotation numeric;
+   alter table photos add column if not exists z_index numeric;
+   alter table photos add column if not exists x numeric;
+   alter table photos add column if not exists y numeric;
+
+   ----------------------------------------------------------------
+   -- 2. Create Table (If you haven't created it yet)
+   ----------------------------------------------------------------
+   create table if not exists photos (
+     id uuid primary key,
+     image_url text not null,
+     caption text,
+     date text,
+     rotation numeric,
+     z_index numeric,
+     x numeric,
+     y numeric,
+     created_at timestamptz default now()
+   );
+
+   ----------------------------------------------------------------
+   -- 3. Enable Realtime & Permissions
+   ----------------------------------------------------------------
+   alter publication supabase_realtime add table photos;
    
-   1. Create the 'photos' table:
-      create table if not exists photos (
-        id uuid primary key,
-        image_url text not null,
-        caption text,
-        date text,
-        rotation numeric,
-        z_index numeric,
-        x numeric,
-        y numeric,
-        created_at timestamptz default now()
-      );
+   alter table photos enable row level security;
+   create policy "Public view" on photos for select to anon using (true);
+   create policy "Public insert" on photos for insert to anon with check (true);
+   create policy "Public delete" on photos for delete to anon using (true);
 
-   2. Enable Realtime:
-      alter publication supabase_realtime add table photos;
-
-   3. Allow Anonymous Access (Row Level Security):
-      alter table photos enable row level security;
-      create policy "Public view" on photos for select to anon using (true);
-      create policy "Public insert" on photos for insert to anon with check (true);
-      create policy "Public delete" on photos for delete to anon using (true);
-
-   4. Create Storage Bucket:
-      insert into storage.buckets (id, name, public) values ('retro-uploads', 'retro-uploads', true);
-      create policy "Public Access" on storage.objects for select to public using ( bucket_id = 'retro-uploads' );
-      create policy "Public Upload" on storage.objects for insert to public with check ( bucket_id = 'retro-uploads' );
+   ----------------------------------------------------------------
+   -- 4. Create Storage Bucket
+   ----------------------------------------------------------------
+   insert into storage.buckets (id, name, public) values ('retro-uploads', 'retro-uploads', true);
+   create policy "Public Access" on storage.objects for select to public using ( bucket_id = 'retro-uploads' );
+   create policy "Public Upload" on storage.objects for insert to public with check ( bucket_id = 'retro-uploads' );
    ===========================================================================
 */
 
@@ -86,7 +102,7 @@ const deleteLocalPhoto = (id: string) => {
 };
 
 // Helper to convert base64 to Blob
-const base64ToBlob = (base64: string, mimeType: string = 'image/png') => {
+const base64ToBlob = (base64: string, mimeType: string = 'image/jpeg') => {
   const byteString = atob(base64.includes(',') ? base64.split(',')[1] : base64);
   const ab = new ArrayBuffer(byteString.length);
   const ia = new Uint8Array(ab);
@@ -115,8 +131,8 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
 
   try {
     // A. Upload Image to Storage
-    const filename = `${photoMetadata.id}.png`;
-    const blob = base64ToBlob(base64Image);
+    const filename = `${photoMetadata.id}.jpg`; // use jpg extension
+    const blob = base64ToBlob(base64Image, 'image/jpeg');
     let finalImageUrl = '';
 
     try {
@@ -135,7 +151,8 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
     } catch (storageError: any) {
       console.warn("Supabase Storage upload failed (using Base64 fallback):", storageError.message);
       // FALLBACK: Use the base64 string directly if storage fails
-      finalImageUrl = base64Image.startsWith('data:') ? base64Image : `data:image/png;base64,${base64Image}`;
+      // Note: Now that we use JPEG compression in RetroCamera, this string is smaller and safer for DB
+      finalImageUrl = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`;
     }
 
     // Update the local backup with the cloud URL if we got one (cleaner than base64)
@@ -165,9 +182,25 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
       ]);
 
     if (dbError) {
-      // Gracefully handle missing table error
-      if (dbError.code === '42P01' || dbError.message.includes('Could not find the table')) {
-         console.warn("⚠️ SUPABASE TABLE MISSING: Running in LOCAL ONLY mode. Please run the SQL script in services/supabase.ts to enable sharing.");
+      // Specific handling for missing columns
+      if (dbError.code === '42703' || dbError.message.includes('Could not find the')) {
+         console.warn(`⚠️ SCHEMA MISMATCH: Your table is missing columns. Running SQL setup is recommended.`);
+         console.warn(`🔄 Attempting COMPATIBILITY INSERT (Photo will sync, but extra metadata might be lost on other devices)...`);
+         
+         // RETRY: Insert ONLY the fields we know usually exist in a basic table (fallback)
+         const { error: retryError } = await supabase.from('photos').insert([{
+            id: photoMetadata.id,
+            image_url: finalImageUrl
+         }]);
+
+         if (retryError) {
+             console.error("❌ Compatibility insert also failed:", retryError.message);
+         } else {
+             console.log("✅ Compatibility insert successful! Photo synced.");
+         }
+
+      } else if (dbError.code === '42P01') {
+         console.warn("⚠️ SUPABASE TABLE MISSING: Running in LOCAL ONLY mode. Please run the SQL setup script.");
       } else {
          console.error("DB Insert Failed (saved locally):", dbError.message);
       }
@@ -191,14 +224,14 @@ export const deletePhoto = async (id: string) => {
     // 2. Delete from DB
     await supabase.from('photos').delete().eq('id', id);
     // 3. Cleanup Storage
-    supabase.storage.from('retro-uploads').remove([`public/${id}.png`]);
+    supabase.storage.from('retro-uploads').remove([`public/${id}.jpg`]);
   } catch (error) {
     console.warn("Cloud delete failed (offline mode?)", error);
   }
 };
 
 /**
- * Hybrid Subscription: LocalStorage + Supabase Realtime
+ * Hybrid Subscription: LocalStorage + Supabase Realtime + Polling
  */
 export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void) => {
   // Local cache to merge updates
@@ -211,8 +244,11 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
     // Sort by timestamp (or created_at if available, assuming timestamp is synced)
     unique.sort((a, b) => b.timestamp - a.timestamp);
     
-    currentPhotos = unique;
-    onPhotosUpdated(currentPhotos);
+    // Only update state if counts differ (basic optimization)
+    if (unique.length !== currentPhotos.length || JSON.stringify(unique.map(p=>p.id)) !== JSON.stringify(currentPhotos.map(p=>p.id))) {
+        currentPhotos = unique;
+        onPhotosUpdated(currentPhotos);
+    }
   };
 
   // 1. Initial Load from Local Storage
@@ -221,12 +257,13 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
   const mapDBToPhotoData = (row: DBPhoto): PhotoData => ({
     id: row.id,
     imageUrl: row.image_url,
-    caption: row.caption,
-    date: row.date,
-    rotation: Number(row.rotation),
-    zIndex: Number(row.z_index),
-    x: Number(row.x),
-    y: Number(row.y),
+    // Handle missing columns safely if we inserted via compatibility mode
+    caption: row.caption || "Shared Memory",
+    date: row.date || new Date().toLocaleDateString(),
+    rotation: Number(row.rotation) || 0,
+    zIndex: Number(row.z_index) || 1,
+    x: Number(row.x) || 0,
+    y: Number(row.y) || 0,
     timestamp: new Date(row.created_at).getTime()
   });
 
@@ -241,14 +278,16 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
     if (!error && data) {
       const cloudPhotos = data.map(mapDBToPhotoData);
       update(cloudPhotos);
-    } else if (error && (error.code === '42P01' || error.message.includes('Could not find the table'))) {
-        console.warn("⚠️ Cloud sync disabled: 'photos' table not found. (Run SQL setup to fix)");
     } else if (error) {
-        console.warn("Cloud fetch error:", error.message);
+        // Silent fail is okay here, it just means offline or table missing
     }
   };
 
+  // Fetch immediately
   fetchCloud();
+
+  // Polling Interval (Safety Net for sync issues)
+  const pollInterval = setInterval(fetchCloud, 10000); // Check every 10s
 
   // 3. Subscribe to DB Changes
   const channel = supabase
@@ -276,8 +315,6 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
   // 4. Subscribe to LOCAL events (for fallback / offline mode)
   const handleLocalUpdate = () => {
       const local = getLocalPhotos();
-      // We overwrite current with local logic carefully to not wipe cloud data
-      // But for simplicity in fallback mode, we re-merge
       update(local);
   };
 
@@ -286,6 +323,7 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
 
   // Return cleanup function
   return () => {
+    clearInterval(pollInterval);
     supabase.removeChannel(channel);
     window.removeEventListener('local-gallery-update', handleLocalUpdate);
     window.removeEventListener('storage', handleLocalUpdate);
