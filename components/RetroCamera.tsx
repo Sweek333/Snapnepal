@@ -9,6 +9,8 @@ interface RetroCameraProps {
 export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcessing }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const [flashActive, setFlashActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   
@@ -17,6 +19,9 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
   const [animatePrint, setAnimatePrint] = useState(false);
 
   useEffect(() => {
+    // Preload the sound
+    audioRef.current = new Audio("https://www.bubbbly.com/assets/retro-camera/polaroid-camera.mp3");
+    
     let stream: MediaStream | null = null;
 
     const startCamera = async (useExactConstraints = true) => {
@@ -70,6 +75,12 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
 
   const handleShutter = () => {
     if (isProcessing || !videoRef.current || !canvasRef.current) return;
+
+    // Play shutter sound
+    if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(err => console.log("Audio play blocked", err));
+    }
 
     // Flash effect
     setFlashActive(true);

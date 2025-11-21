@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { RetroCamera } from './components/RetroCamera';
 import { Polaroid } from './components/Polaroid';
 import { PinboardGallery } from './components/PinboardGallery';
@@ -8,7 +8,8 @@ import { generatePhotoCaption } from './services/geminiService';
 import { 
   uploadAndSavePhoto, 
   useRealtimePhotos,
-  deletePhoto
+  deletePhoto,
+  clearAllPhotos
 } from './services/supabase';
 
 // Helper to generate random numbers within a range
@@ -19,13 +20,19 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  
+  // Ref to hold the refresh function from the service
+  const refreshGalleryRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // Initialize Realtime Subscription
   useEffect(() => {
     // This hook handles fetching initial data AND listening for new inserts/deletes
-    const unsubscribe = useRealtimePhotos((updatedPhotos) => {
+    const { unsubscribe, refresh } = useRealtimePhotos((updatedPhotos) => {
       setGalleryPhotos(updatedPhotos);
     });
+    
+    refreshGalleryRef.current = refresh;
+    
     return () => unsubscribe();
   }, []);
 
@@ -89,6 +96,11 @@ const App: React.FC = () => {
     // Perform actual delete (Realtime will propagate/confirm this)
     await deletePhoto(id);
   };
+
+  const handleClearGallery = async () => {
+     setGalleryPhotos([]);
+     await clearAllPhotos();
+  };
   
   const handleDownload = () => {
     // Logic to download latest session photo if needed
@@ -101,6 +113,12 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRefreshGallery = async () => {
+    if (refreshGalleryRef.current) {
+        await refreshGalleryRef.current();
+    }
+  };
+
   return (
     <div className="relative min-h-screen w-full bg-[#e5e5e5] bg-dot-pattern flex flex-col overflow-hidden">
       
@@ -109,6 +127,8 @@ const App: React.FC = () => {
         onClose={() => setIsGalleryOpen(false)} 
         photos={galleryPhotos}
         onDeletePhoto={handleDeletePhoto}
+        onRefresh={handleRefreshGallery}
+        onClear={handleClearGallery}
       />
 
       {/* Notification Toast */}

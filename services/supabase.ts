@@ -231,7 +231,28 @@ export const deletePhoto = async (id: string) => {
 };
 
 /**
+ * WIPE EVERYTHING (Reset Gallery)
+ */
+export const clearAllPhotos = async () => {
+  // 1. Wipe Local
+  localStorage.removeItem(LOCAL_STORAGE_KEY);
+  window.dispatchEvent(new Event('local-gallery-update'));
+
+  try {
+    // 2. Wipe DB
+    // Deleting where ID is not '000...000' effectively deletes all rows
+    const { error } = await supabase.from('photos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+        console.warn("Failed to clear remote DB (RLS might restrict this):", error.message);
+    }
+  } catch (e) {
+      console.error("Clear gallery failed:", e);
+  }
+};
+
+/**
  * Hybrid Subscription: LocalStorage + Supabase Realtime + Polling
+ * Returns { unsubscribe, refresh }
  */
 export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void) => {
   // Local cache to merge updates
@@ -269,17 +290,19 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
 
   // 2. Fetch from Supabase
   const fetchCloud = async () => {
-    const { data, error } = await supabase
-      .from('photos')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(50);
+    try {
+        const { data, error } = await supabase
+        .from('photos')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
 
-    if (!error && data) {
-      const cloudPhotos = data.map(mapDBToPhotoData);
-      update(cloudPhotos);
-    } else if (error) {
-        // Silent fail is okay here, it just means offline or table missing
+        if (!error && data) {
+        const cloudPhotos = data.map(mapDBToPhotoData);
+        update(cloudPhotos);
+        }
+    } catch (e) {
+        // Ignore errors
     }
   };
 
@@ -287,7 +310,7 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
   fetchCloud();
 
   // Polling Interval (Safety Net for sync issues)
-  const pollInterval = setInterval(fetchCloud, 10000); // Check every 10s
+  const pollInterval = setInterval(fetchCloud, 2000); // Check faster (every 2s)
 
   // 3. Subscribe to DB Changes
   const channel = supabase
@@ -296,6 +319,7 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'photos' },
       (payload) => {
+        console.log("⚡️ Realtime INSERT received!");
         const newPhoto = mapDBToPhotoData(payload.new as DBPhoto);
         update([newPhoto]);
       }
@@ -305,27 +329,40 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
       { event: 'DELETE', schema: 'public', table: 'photos' },
       (payload) => {
         const deletedId = payload.old.id;
+        console.log("⚡️ Realtime DELETE received!");
         currentPhotos = currentPhotos.filter(p => p.id !== deletedId);
         onPhotosUpdated([...currentPhotos]);
         deleteLocalPhoto(deletedId);
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+        if (status === 'SUBSCRIBED') console.log("✅ Realtime Connected");
+        if (status === 'CHANNEL_ERROR') console.log("❌ Realtime Connection Failed (Will use polling)");
+    });
 
   // 4. Subscribe to LOCAL events (for fallback / offline mode)
   const handleLocalUpdate = () => {
       const local = getLocalPhotos();
-      update(local);
+      // If local is empty (cleared), we force update to empty
+      if (local.length === 0) {
+         currentPhotos = [];
+         onPhotosUpdated([]);
+      } else {
+         update(local);
+      }
   };
 
   window.addEventListener('local-gallery-update', handleLocalUpdate);
   window.addEventListener('storage', handleLocalUpdate); // Cross-tab sync
 
-  // Return cleanup function
-  return () => {
-    clearInterval(pollInterval);
-    supabase.removeChannel(channel);
-    window.removeEventListener('local-gallery-update', handleLocalUpdate);
-    window.removeEventListener('storage', handleLocalUpdate);
+  // Return cleanup function and refresh capability
+  return {
+    unsubscribe: () => {
+        clearInterval(pollInterval);
+        supabase.removeChannel(channel);
+        window.removeEventListener('local-gallery-update', handleLocalUpdate);
+        window.removeEventListener('storage', handleLocalUpdate);
+    },
+    refresh: fetchCloud
   };
 };
