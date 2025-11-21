@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { RetroCamera } from './components/RetroCamera';
 import { Polaroid } from './components/Polaroid';
 import { PinboardGallery } from './components/PinboardGallery';
@@ -13,36 +13,62 @@ const App: React.FC = () => {
   const [galleryPhotos, setGalleryPhotos] = useState<PhotoData[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  
+  // Channel for live updates across tabs
+  const syncChannel = useRef<BroadcastChannel | null>(null);
 
-  // Load photos from localStorage on mount and handle 24h expiration
+  // Load photos and setup sync listeners
   useEffect(() => {
-    const savedPhotos = localStorage.getItem('retro-snap-gallery');
-    if (savedPhotos) {
-      try {
-        const parsed: PhotoData[] = JSON.parse(savedPhotos);
-        const now = Date.now();
-        const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+    // Initialize BroadcastChannel
+    syncChannel.current = new BroadcastChannel('retro_snap_sync');
 
-        const validPhotos = parsed.filter(p => {
-            // If legacy photo (no timestamp), keep it (or optional: expire immediately)
-            // Here we keep it to be nice to existing users
-            if (!p.timestamp) return true;
-            
-            // Check if photo is older than 24 hours
-            return (now - p.timestamp) < twentyFourHoursMs;
-        });
+    const loadAndCleanGallery = () => {
+      const savedPhotos = localStorage.getItem('retro-snap-gallery');
+      if (savedPhotos) {
+        try {
+          const parsed: PhotoData[] = JSON.parse(savedPhotos);
+          const now = Date.now();
+          const twentyFourHoursMs = 24 * 60 * 60 * 1000;
 
-        // If we filtered out any old photos, update storage
-        if (validPhotos.length !== parsed.length) {
-            console.log(`Cleaned up ${parsed.length - validPhotos.length} expired memories.`);
-            localStorage.setItem('retro-snap-gallery', JSON.stringify(validPhotos));
+          const validPhotos = parsed.filter(p => {
+              // If legacy photo (no timestamp), keep it
+              if (!p.timestamp) return true;
+              // Check if photo is older than 24 hours
+              return (now - p.timestamp) < twentyFourHoursMs;
+          });
+
+          // Update storage if we cleaned up
+          if (validPhotos.length !== parsed.length) {
+              localStorage.setItem('retro-snap-gallery', JSON.stringify(validPhotos));
+          }
+          
+          setGalleryPhotos(validPhotos);
+        } catch (e) {
+          console.error("Failed to load gallery photos", e);
         }
-        
-        setGalleryPhotos(validPhotos);
-      } catch (e) {
-        console.error("Failed to load gallery photos", e);
       }
-    }
+    };
+
+    // Initial load
+    loadAndCleanGallery();
+
+    // Listen for updates from other tabs (BroadcastChannel)
+    syncChannel.current.onmessage = () => {
+        loadAndCleanGallery();
+    };
+
+    // Listen for storage events (fallback for some browsers)
+    const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === 'retro-snap-gallery') {
+            loadAndCleanGallery();
+        }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      syncChannel.current?.close();
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   const handleTakePhoto = useCallback(async (imageData: string) => {
@@ -68,12 +94,16 @@ const App: React.FC = () => {
       // Add to current session (scattered view)
       setSessionPhotos((prev) => [...prev, newPhoto]);
 
-      // Add to persistent gallery
-      setGalleryPhotos((prev) => {
-        const updated = [...prev, newPhoto];
-        localStorage.setItem('retro-snap-gallery', JSON.stringify(updated));
-        return updated;
-      });
+      // Add to persistent gallery (Read-Modify-Write for safety)
+      const existingJson = localStorage.getItem('retro-snap-gallery');
+      const currentGallery: PhotoData[] = existingJson ? JSON.parse(existingJson) : [];
+      const updatedGallery = [...currentGallery, newPhoto];
+      
+      localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
+      setGalleryPhotos(updatedGallery);
+
+      // Broadcast update to other tabs
+      syncChannel.current?.postMessage('update');
 
     } catch (error) {
       console.error("Error processing photo:", error);
@@ -98,10 +128,18 @@ const App: React.FC = () => {
   };
 
   const handleDeletePhoto = (id: string) => {
-    // Confirmation is now handled in the Polaroid component for better UX
-    const updatedGallery = galleryPhotos.filter((p) => p.id !== id);
-    setGalleryPhotos(updatedGallery);
-    localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
+    // Read fresh from LS to avoid race conditions with other tabs
+    const existingJson = localStorage.getItem('retro-snap-gallery');
+    if (existingJson) {
+        const currentGallery: PhotoData[] = JSON.parse(existingJson);
+        const updatedGallery = currentGallery.filter((p) => p.id !== id);
+        
+        localStorage.setItem('retro-snap-gallery', JSON.stringify(updatedGallery));
+        setGalleryPhotos(updatedGallery);
+        
+        // Notify other tabs
+        syncChannel.current?.postMessage('update');
+    }
     
     // Also remove from session if present
     setSessionPhotos((prev) => prev.filter((p) => p.id !== id));

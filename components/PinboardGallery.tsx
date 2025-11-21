@@ -47,8 +47,8 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
                     <div className="w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-black/10 mb-4 flex items-center justify-center">
                         <span className="text-2xl sm:text-4xl">📷</span>
                     </div>
-                    <p className="font-hand text-xl sm:text-3xl text-[#5d4037]">No memories pinned yet...</p>
-                    <p className="font-hand text-lg sm:text-xl text-[#5d4037] mt-2">Take a photo to pin it here!</p>
+                    <p className="font-hand text-xl sm:text-3xl text-[#5d4037]">Gallery is empty...</p>
+                    <p className="font-hand text-lg sm:text-xl text-[#5d4037] mt-2">Snap a photo to share it with everyone!</p>
                  </div>
               ) : (
                 photos.slice().reverse().map((photo) => (
