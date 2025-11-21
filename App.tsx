@@ -24,6 +24,7 @@ const App: React.FC = () => {
 
   // Initialize Realtime Subscription
   useEffect(() => {
+    // This now handles merging Local + Cloud data to ensure persistence
     const unsubscribe = subscribeToPhotos((updatedPhotos) => {
       setGalleryPhotos(updatedPhotos);
     });
@@ -40,8 +41,7 @@ const App: React.FC = () => {
       // 1. Generate caption using Gemini
       const aiData = await generatePhotoCaption(imageData);
 
-      // 2. Upload image to Supabase Storage
-      // If bucket is missing, it falls back to returning the base64 string so user experience is uninterrupted
+      // 2. Upload image to Supabase Storage (or base64 fallback)
       const publicUrl = await uploadPhotoToSupabase(imageData, photoId);
       
       if (!publicUrl) throw new Error("Failed to process image data");
@@ -58,20 +58,19 @@ const App: React.FC = () => {
         timestamp: timestamp,
       };
 
-      // 3. Add to current session (instant feedback)
+      // 3. Add to current session view (instant feedback)
       setSessionPhotos((prev) => [...prev, newPhoto]);
 
-      // 4. Save metadata to Supabase DB (triggers realtime for others)
+      // 4. Save to DB (and Local Storage automatically via the service)
       const savedToCloud = await savePhotoToDB(newPhoto);
 
       if (!savedToCloud) {
-          // Fallback UI indicator if cloud save failed
           setIsCloudConnected(false);
-          // We still add it to the gallery view locally so the user sees it
-          setGalleryPhotos((prev) => [newPhoto, ...prev]);
       } else {
           setIsCloudConnected(true);
       }
+      
+      // Note: subscribeToPhotos will automatically trigger and update galleryPhotos
 
     } catch (error) {
       console.error("Error processing photo:", error);
@@ -172,19 +171,19 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Live Film Strip at Bottom */}
+      {/* Live Film Strip at Bottom (Always visible gallery) */}
       <FilmStrip 
         photos={galleryPhotos} 
         onPhotoClick={() => setIsGalleryOpen(true)}
       />
 
-      {/* Gallery Button (Alternative access) */}
-      <div className="absolute bottom-56 left-4 z-40 hidden sm:block">
+      {/* View Gallery Button (Mobile friendly alternative) */}
+      <div className="absolute bottom-56 left-4 z-40 block sm:hidden">
         <button 
           onClick={() => setIsGalleryOpen(true)}
-          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-4 py-2 rounded-full font-bold shadow-lg hover:scale-105 transition-transform text-xs"
+          className="bg-[#8D6E63] text-white border-2 border-[#5D4037] px-4 py-2 rounded-full font-bold shadow-lg hover:scale-105 transition-transform text-xs flex items-center gap-2"
         >
-          View Full Pinboard
+          <span>📌</span> View Gallery
         </button>
       </div>
 

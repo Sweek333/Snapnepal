@@ -44,6 +44,19 @@ const base64ToBlob = (base64: string, mimeType: string = 'image/png') => {
   return new Blob([ab], { type: mimeType });
 };
 
+// Helper to merge Cloud and Local data (Union) to ensure persistence
+const mergePhotos = (cloudPhotos: PhotoData[], localPhotos: PhotoData[]): PhotoData[] => {
+    const photoMap = new Map<string, PhotoData>();
+    
+    // Add local photos first
+    localPhotos.forEach(p => photoMap.set(p.id, p));
+    
+    // Add/Overwrite with cloud photos (Assuming cloud is authority, but we want to keep local if cloud misses them)
+    cloudPhotos.forEach(p => photoMap.set(p.id, p));
+    
+    return Array.from(photoMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+};
+
 // --- Public API ---
 
 export const uploadPhotoToSupabase = async (base64Image: string, filename: string): Promise<string | null> => {
@@ -60,7 +73,6 @@ export const uploadPhotoToSupabase = async (base64Image: string, filename: strin
 
     if (uploadError) {
       console.warn("Supabase Storage Upload failed (Bucket likely missing). Using Base64 fallback.");
-      // If bucket doesn't exist, just return the base64 so the app still works visually
       return base64Image;
     }
 
@@ -76,9 +88,10 @@ export const uploadPhotoToSupabase = async (base64Image: string, filename: strin
 };
 
 export const savePhotoToDB = async (photo: PhotoData): Promise<boolean> => {
+  // ALWAYS save to local backup first to ensure it's never lost
+  saveLocalBackup(photo);
+
   try {
-    // Ensure we use snake_case for DB columns if that's how the table is set up,
-    // but based on standard setup, we map carefully.
     const { error } = await supabase
       .from('photos')
       .insert([
@@ -96,30 +109,24 @@ export const savePhotoToDB = async (photo: PhotoData): Promise<boolean> => {
       ]);
 
     if (error) {
-        console.error("Supabase DB Insert Failed:", error.message);
-        // Save locally if cloud fails
-        saveLocalBackup(photo);
+        console.error("Supabase DB Insert Failed (using local backup):", error.message);
         return false;
     }
     return true;
   } catch (e) {
     console.error("Unexpected error saving to DB:", e);
-    saveLocalBackup(photo);
     return false;
   }
 };
 
 export const deletePhotoFromSupabase = async (id: string) => {
+  deleteLocalBackup(id); // Delete locally immediately
+
   try {
     const { error: dbError } = await supabase
       .from('photos')
       .delete()
       .eq('id', id);
-
-    if (dbError) {
-        console.warn("Supabase DB Delete failed, trying local backup deletion.");
-        deleteLocalBackup(id);
-    }
 
     // Attempt storage delete (fire and forget)
     supabase.storage
@@ -127,62 +134,57 @@ export const deletePhotoFromSupabase = async (id: string) => {
       .remove([`public/${id}.png`]).then(() => {});
 
   } catch (e) {
-    deleteLocalBackup(id);
+    console.warn("Error deleting from cloud", e);
   }
 };
 
 export const subscribeToPhotos = (onUpdate: (photos: PhotoData[]) => void) => {
-  let isCloudWorking = true;
+  // 1. Immediately load local backup so user sees their photos
+  const localPhotos = getLocalBackup();
+  onUpdate(localPhotos.sort((a, b) => b.timestamp - a.timestamp));
 
-  // Initial Fetch
+  // 2. Fetch Cloud Data
   const fetchPhotos = async () => {
     const { data, error } = await supabase
       .from('photos')
       .select('*')
       .order('timestamp', { ascending: false })
-      .limit(50); // Limit to last 50 for performance
+      .limit(100);
     
-    if (error) {
-        console.warn("Supabase Fetch Failed. Loading Local Backup.");
-        isCloudWorking = false;
-        const localPhotos = getLocalBackup();
-        // Sort local photos by timestamp desc
-        onUpdate(localPhotos.sort((a, b) => b.timestamp - a.timestamp));
+    const currentLocal = getLocalBackup();
+
+    if (error || !data) {
+        console.warn("Supabase Fetch Failed or Empty. Keeping Local Backup.");
         return;
     }
 
-    if (data) {
-      const mappedPhotos: PhotoData[] = data.map((row: any) => ({
-        id: row.id,
-        imageUrl: row.image_url, // DB column snake_case -> camelCase
-        caption: row.caption,
-        date: row.date,
-        rotation: row.rotation,
-        zIndex: row.z_index,
-        x: row.x,
-        y: row.y,
-        timestamp: row.timestamp
-      }));
-      onUpdate(mappedPhotos);
-    }
+    const cloudPhotos: PhotoData[] = data.map((row: any) => ({
+      id: row.id,
+      imageUrl: row.image_url,
+      caption: row.caption,
+      date: row.date,
+      rotation: row.rotation,
+      zIndex: row.z_index,
+      x: row.x,
+      y: row.y,
+      timestamp: row.timestamp
+    }));
+
+    // Merge Cloud and Local
+    const merged = mergePhotos(cloudPhotos, currentLocal);
+    onUpdate(merged);
   };
 
   fetchPhotos();
 
-  // Realtime Subscription
+  // 3. Subscribe to Realtime Changes
   const channel = supabase
     .channel('public:photos')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'photos' }, (payload) => {
        console.log('Realtime update received!', payload);
-       if (isCloudWorking) {
-         fetchPhotos(); 
-       }
+       fetchPhotos(); 
     })
-    .subscribe((status) => {
-       if (status === 'SUBSCRIBED') {
-         console.log('Connected to Supabase Realtime');
-       }
-    });
+    .subscribe();
 
   return () => {
     supabase.removeChannel(channel);
