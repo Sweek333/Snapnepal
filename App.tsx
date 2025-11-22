@@ -193,7 +193,7 @@ const App: React.FC = () => {
       {/* CUTE PINBOARD BUTTON */}
       <button 
         onClick={() => setIsGalleryOpen(true)}
-        className="absolute bottom-6 left-6 sm:bottom-10 sm:left-10 z-50 bg-[#8D6E63] hover:bg-[#795548] text-white border-[3px] sm:border-[4px] border-[#5D4037] px-4 sm:px-8 py-2 sm:py-3 rounded-full shadow-[0_4px_0_#5D4037] hover:shadow-[0_2px_0_#5D4037] hover:translate-y-[2px] active:translate-y-[4px] active:shadow-none transition-all flex items-center gap-2 sm:gap-4 group"
+        className="absolute bottom-12 left-6 sm:bottom-10 sm:left-10 z-50 bg-[#8D6E63] hover:bg-[#795548] text-white border-[3px] sm:border-[4px] border-[#5D4037] px-4 sm:px-8 py-2 sm:py-3 rounded-full shadow-[0_4px_0_#5D4037] hover:shadow-[0_2px_0_#5D4037] hover:translate-y-[2px] active:translate-y-[4px] active:shadow-none transition-all flex items-center gap-2 sm:gap-4 group"
       >
          <div className="relative">
             <div className="transform -rotate-12 text-2xl sm:text-3xl drop-shadow-sm group-hover:scale-110 transition-transform text-red-500">📌</div>
