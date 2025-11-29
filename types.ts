@@ -3,6 +3,8 @@ export interface PhotoData {
   id: string; // The UUID
   imageUrl: string; 
   caption: string;
+  authorName?: string; // User's name
+  socialHandle?: string; // User's social/comment
   date: string;
   rotation: number;
   zIndex: number;

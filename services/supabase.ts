@@ -4,17 +4,25 @@ import { PhotoData } from '../types';
 
 /* 
    ===========================================================================
-   ⚡️ SUPABASE SETUP INSTRUCTIONS (REQUIRED FOR REALTIME SYNC) ⚡️
+   ⚡️ SUPABASE SETUP INSTRUCTIONS (REQUIRED) ⚡️
    
-   Run this SQL in your Supabase Dashboard > SQL Editor:
+   Run this SQL in your Supabase Dashboard > SQL Editor to fix the "Missing Column" errors:
 
    ----------------------------------------------------------------
-   -- 1. Create Table
+   -- 1. ADD MISSING COLUMNS (Run this if table exists but update fails)
+   ----------------------------------------------------------------
+   alter table photos add column if not exists author_name text;
+   alter table photos add column if not exists social_handle text;
+
+   ----------------------------------------------------------------
+   -- 2. Create Table (Only if starting fresh)
    ----------------------------------------------------------------
    create table if not exists photos (
      id uuid primary key,
      image_url text not null,
      caption text,
+     author_name text,
+     social_handle text,
      date text,
      rotation numeric,
      z_index numeric,
@@ -24,12 +32,12 @@ import { PhotoData } from '../types';
    );
 
    ----------------------------------------------------------------
-   -- 2. Enable Realtime
+   -- 3. Enable Realtime (For instant gallery updates)
    ----------------------------------------------------------------
    alter publication supabase_realtime add table photos;
    
    ----------------------------------------------------------------
-   -- 3. Policies (Allow Public Read/Write/Delete)
+   -- 4. Policies (Allow Public Access)
    ----------------------------------------------------------------
    alter table photos enable row level security;
    
@@ -37,11 +45,14 @@ import { PhotoData } from '../types';
    create policy "Public view" on photos for select to anon using (true);
    create policy "Public insert" on photos for insert to anon with check (true);
    
-   -- Allow DELETE (Required for 'Clear Gallery' to work)
+   -- Allow UPDATE (Crucial for editing Bio/Name)
+   create policy "Public update" on photos for update to anon using (true);
+
+   -- Allow DELETE (Crucial for Delete/Reset)
    create policy "Public delete" on photos for delete to anon using (true);
 
    ----------------------------------------------------------------
-   -- 4. Storage Bucket
+   -- 5. Storage Bucket
    ----------------------------------------------------------------
    insert into storage.buckets (id, name, public) values ('retro-uploads', 'retro-uploads', true)
    on conflict (id) do nothing;
@@ -52,8 +63,9 @@ import { PhotoData } from '../types';
    ===========================================================================
 */
 
-const supabaseUrl = 'https://rbwlnnspktdijewmdivj.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJid2xubnNwa3RkaWpld21kaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM2ODAyNjEsImV4cCI6MjA3OTI1NjI2MX0.VKJ_ZA8r56PhQhoTZ_b6TupIS_bCtlBsvxyblDJfBNs';
+// Use env vars if available, otherwise fallback (for demo purposes)
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://rbwlnnspktdijewmdivj.supabase.co';
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJid2xubnNwa3RkaWpld21kaXZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM2ODAyNjEsImV4cCI6MjA3OTI1NjI2MX0.VKJ_ZA8r56PhQhoTZ_b6TupIS_bCtlBsvxyblDJfBNs';
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -64,6 +76,8 @@ interface DBPhoto {
   id: string;
   image_url: string;
   caption: string;
+  author_name?: string;
+  social_handle?: string;
   date: string;
   rotation: number;
   z_index: number;
@@ -83,13 +97,19 @@ const getLocalPhotos = (): PhotoData[] => {
 };
 
 const saveLocalBackup = (photo: PhotoData) => {
-  const current = getLocalPhotos();
-  // Prevent duplicates
-  if (!current.some(p => p.id === photo.id)) {
-    const updated = [photo, ...current];
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-    // Dispatch local event for same-tab updates
-    window.dispatchEvent(new Event('local-gallery-update'));
+  try {
+      const current = getLocalPhotos();
+      // Prevent duplicates
+      if (!current.some(p => p.id === photo.id)) {
+        const updated = [photo, ...current];
+        // Enforce a limit to prevent QuotaExceededError
+        if (updated.length > 50) updated.length = 50; 
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        // Dispatch local event for same-tab updates
+        window.dispatchEvent(new Event('local-gallery-update'));
+      }
+  } catch (e) {
+      console.warn("Local storage full or disabled, skipping backup");
   }
 };
 
@@ -125,12 +145,11 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
   };
 
   // 2. SAVE LOCAL BACKUP IMMEDIATELY
-  // This ensures that even if the next lines fail, the photo is saved on this device.
   saveLocalBackup(fullPhotoData);
 
   try {
     // A. Upload Image to Storage
-    const filename = `${photoMetadata.id}.jpg`; // use jpg extension
+    const filename = `${photoMetadata.id}.jpg`;
     const blob = base64ToBlob(base64Image, 'image/jpeg');
     let finalImageUrl = '';
 
@@ -149,12 +168,9 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
       
     } catch (storageError: any) {
       console.warn("Supabase Storage upload failed (using Base64 fallback):", storageError.message);
-      // FALLBACK: Use the base64 string directly if storage fails
-      // Note: Now that we use JPEG compression in RetroCamera, this string is smaller and safer for DB
       finalImageUrl = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${base64Image}`;
     }
 
-    // Update the local backup with the cloud URL if we got one (cleaner than base64)
     if (finalImageUrl.startsWith('http')) {
         const current = getLocalPhotos();
         const index = current.findIndex(p => p.id === photoMetadata.id);
@@ -177,27 +193,20 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
           z_index: photoMetadata.zIndex,
           x: photoMetadata.x || 0,
           y: photoMetadata.y || 0,
+          author_name: photoMetadata.authorName,
+          social_handle: photoMetadata.socialHandle
         }
       ]);
 
     if (dbError) {
-      // Specific handling for missing columns
       if (dbError.code === '42703' || dbError.message.includes('Could not find the')) {
-         console.warn(`⚠️ SCHEMA MISMATCH: Your table is missing columns. Running SQL setup is recommended.`);
-         console.warn(`🔄 Attempting COMPATIBILITY INSERT (Photo will sync, but extra metadata might be lost on other devices)...`);
-         
-         // RETRY: Insert ONLY the fields we know usually exist in a basic table (fallback)
-         const { error: retryError } = await supabase.from('photos').insert([{
+         console.warn(`⚠️ SCHEMA MISMATCH: Your table is missing columns. PLEASE RUN THE SQL SETUP SCRIPT!`);
+         // RETRY: Insert ONLY the fields we know usually exist to ensure at least the photo is saved
+         await supabase.from('photos').insert([{
             id: photoMetadata.id,
-            image_url: finalImageUrl
+            image_url: finalImageUrl,
+            caption: photoMetadata.caption
          }]);
-
-         if (retryError) {
-             console.error("❌ Compatibility insert also failed:", retryError.message);
-         } else {
-             console.log("✅ Compatibility insert successful! Photo synced.");
-         }
-
       } else if (dbError.code === '42P01') {
          console.warn("⚠️ SUPABASE TABLE MISSING: Running in LOCAL ONLY mode. Please run the SQL setup script.");
       } else {
@@ -213,19 +222,57 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
 };
 
 /**
+ * Update photo details (Name, Social, Caption)
+ */
+export const updatePhoto = async (id: string, updates: Partial<PhotoData>) => {
+  // Update Local Backup first
+  const current = getLocalPhotos();
+  const index = current.findIndex(p => p.id === id);
+  if (index !== -1) {
+      current[index] = { ...current[index], ...updates };
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(current));
+      window.dispatchEvent(new Event('local-gallery-update'));
+  }
+
+  // Update Cloud
+  try {
+      const dbUpdates: any = {};
+      if (updates.caption !== undefined) dbUpdates.caption = updates.caption;
+      if (updates.authorName !== undefined) dbUpdates.author_name = updates.authorName;
+      if (updates.socialHandle !== undefined) dbUpdates.social_handle = updates.socialHandle;
+
+      // If nothing to update on DB, return
+      if (Object.keys(dbUpdates).length === 0) return;
+
+      const { error } = await supabase.from('photos').update(dbUpdates).eq('id', id);
+      
+      if (error) {
+          if (error.code === '42703' || error.message.includes('column')) {
+              console.warn("⚠️ UPDATE FAILED: Database is missing 'author_name' or 'social_handle'.");
+              console.warn("👉 ACTION REQUIRED: Run the SQL script at the top of services/supabase.ts in your Supabase Dashboard.");
+          } else if (error.code === '42501') {
+              console.warn("⚠️ UPDATE FAILED: Permission denied. Check RLS policies.");
+          } else {
+             console.error("Error updating photo:", error.message);
+          }
+      }
+  } catch (e: any) {
+      console.error("Update exception:", e.message || e);
+  }
+};
+
+/**
  * Delete photo from DB and Storage
  */
 export const deletePhoto = async (id: string) => {
-  // 1. Delete Locally
   deleteLocalPhoto(id);
-
   try {
-    // 2. Delete from DB
-    await supabase.from('photos').delete().eq('id', id);
-    // 3. Cleanup Storage
+    const { error } = await supabase.from('photos').delete().eq('id', id);
+    if (error) throw error;
+    // Attempt storage delete (fire and forget)
     supabase.storage.from('retro-uploads').remove([`public/${id}.jpg`]);
   } catch (error) {
-    console.warn("Cloud delete failed (offline mode?)", error);
+    console.warn("Cloud delete failed", error);
   }
 };
 
@@ -233,34 +280,22 @@ export const deletePhoto = async (id: string) => {
  * WIPE EVERYTHING (Reset Gallery)
  */
 export const clearAllPhotos = async () => {
-  // 1. Wipe Local
   localStorage.removeItem(LOCAL_STORAGE_KEY);
   window.dispatchEvent(new Event('local-gallery-update'));
 
   try {
-    // 2. Wipe DB
-    // Strategy: Fetch all IDs first, then delete by ID list.
-    // This is safer than bulk delete commands which are often blocked by default RLS.
     const { data: photos, error: fetchError } = await supabase.from('photos').select('id');
-    
     if (fetchError) throw fetchError;
 
     if (photos && photos.length > 0) {
         const ids = photos.map(p => p.id);
         const storagePaths = ids.map(id => `public/${id}.jpg`);
 
-        // Delete Rows
         const { error: deleteError } = await supabase.from('photos').delete().in('id', ids);
-        if (deleteError) {
-             console.warn("Failed to delete rows from DB (Check RLS policies):", deleteError.message);
-        } else {
-            console.log(`✅ Deleted ${ids.length} photos from DB`);
-        }
+        if (deleteError) console.warn("Failed to delete rows:", deleteError.message);
 
-        // Delete Storage Files (Best effort)
         if (storagePaths.length > 0) {
-            const { error: storageError } = await supabase.storage.from('retro-uploads').remove(storagePaths);
-            if (storageError) console.warn("Storage cleanup warning:", storageError.message);
+            await supabase.storage.from('retro-uploads').remove(storagePaths);
         }
     }
   } catch (e: any) {
@@ -270,34 +305,29 @@ export const clearAllPhotos = async () => {
 
 /**
  * Hybrid Subscription: LocalStorage + Supabase Realtime + Polling
- * Returns { unsubscribe, refresh }
  */
 export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void) => {
-  // Local cache to merge updates
   let currentPhotos: PhotoData[] = getLocalPhotos();
   
   const update = (newPhotos: PhotoData[]) => {
-    // Merge logic: Keep unique by ID, sort by timestamp desc
     const combined = [...newPhotos, ...currentPhotos];
     const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
-    // Sort by timestamp (or created_at if available, assuming timestamp is synced)
     unique.sort((a, b) => b.timestamp - a.timestamp);
     
-    // Only update state if counts differ (basic optimization)
-    if (unique.length !== currentPhotos.length || JSON.stringify(unique.map(p=>p.id)) !== JSON.stringify(currentPhotos.map(p=>p.id))) {
+    if (unique.length !== currentPhotos.length || JSON.stringify(unique) !== JSON.stringify(currentPhotos)) {
         currentPhotos = unique;
         onPhotosUpdated(currentPhotos);
     }
   };
 
-  // 1. Initial Load from Local Storage
   onPhotosUpdated(currentPhotos);
 
   const mapDBToPhotoData = (row: DBPhoto): PhotoData => ({
     id: row.id,
     imageUrl: row.image_url,
-    // Handle missing columns safely if we inserted via compatibility mode
-    caption: row.caption || "Shared Memory",
+    caption: row.caption || "",
+    authorName: row.author_name || "",
+    socialHandle: row.social_handle || "",
     date: row.date || new Date().toLocaleDateString(),
     rotation: Number(row.rotation) || 0,
     zIndex: Number(row.z_index) || 1,
@@ -306,7 +336,6 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
     timestamp: new Date(row.created_at).getTime()
   });
 
-  // 2. Fetch from Supabase
   const fetchCloud = async () => {
     try {
         const { data, error } = await supabase
@@ -319,61 +348,49 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
         const cloudPhotos = data.map(mapDBToPhotoData);
         update(cloudPhotos);
         }
-    } catch (e) {
-        // Ignore errors
-    }
+    } catch (e) { }
   };
 
-  // Fetch immediately
   fetchCloud();
+  const pollInterval = setInterval(fetchCloud, 2000);
 
-  // Polling Interval (Safety Net for sync issues)
-  const pollInterval = setInterval(fetchCloud, 2000); // Check faster (every 2s)
-
-  // 3. Subscribe to DB Changes
   const channel = supabase
     .channel('public:photos')
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'photos' },
+      { event: '*', schema: 'public', table: 'photos' },
       (payload) => {
-        console.log("⚡️ Realtime INSERT received!");
-        const newPhoto = mapDBToPhotoData(payload.new as DBPhoto);
-        update([newPhoto]);
+        if (payload.eventType === 'INSERT') {
+            update([mapDBToPhotoData(payload.new as DBPhoto)]);
+        } else if (payload.eventType === 'DELETE') {
+            const deletedId = payload.old.id;
+            currentPhotos = currentPhotos.filter(p => p.id !== deletedId);
+            onPhotosUpdated([...currentPhotos]);
+            deleteLocalPhoto(deletedId);
+        } else if (payload.eventType === 'UPDATE') {
+            const updatedPhoto = mapDBToPhotoData(payload.new as DBPhoto);
+            currentPhotos = currentPhotos.map(p => p.id === updatedPhoto.id ? updatedPhoto : p);
+            onPhotosUpdated([...currentPhotos]);
+        }
       }
     )
-    .on(
-      'postgres_changes',
-      { event: 'DELETE', schema: 'public', table: 'photos' },
-      (payload) => {
-        const deletedId = payload.old.id;
-        console.log("⚡️ Realtime DELETE received!");
-        currentPhotos = currentPhotos.filter(p => p.id !== deletedId);
-        onPhotosUpdated([...currentPhotos]);
-        deleteLocalPhoto(deletedId);
-      }
-    )
-    .subscribe((status) => {
-        if (status === 'SUBSCRIBED') console.log("✅ Realtime Connected");
-        if (status === 'CHANNEL_ERROR') console.log("❌ Realtime Connection Failed (Will use polling)");
-    });
+    .subscribe();
 
-  // 4. Subscribe to LOCAL events (for fallback / offline mode)
   const handleLocalUpdate = () => {
       const local = getLocalPhotos();
-      // If local is empty (cleared), we force update to empty
-      if (local.length === 0) {
-         currentPhotos = [];
-         onPhotosUpdated([]);
+      if (local.length === 0 && currentPhotos.length > 0) {
+         // If local was cleared, we might want to refresh from cloud or respect the clear
+         // For now, let's just sync
+         // currentPhotos = [];
+         // onPhotosUpdated([]);
       } else {
          update(local);
       }
   };
 
   window.addEventListener('local-gallery-update', handleLocalUpdate);
-  window.addEventListener('storage', handleLocalUpdate); // Cross-tab sync
+  window.addEventListener('storage', handleLocalUpdate);
 
-  // Return cleanup function and refresh capability
   return {
     unsubscribe: () => {
         clearInterval(pollInterval);

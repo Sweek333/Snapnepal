@@ -150,7 +150,7 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
         />
 
         {/* Viewfinder / Lens Area - Adjusted for specific beige camera asset */}
-        <div className="absolute top-[26.5%] left-[31%] w-[41.5%] h-[41.5%] z-30 rounded-full overflow-hidden bg-[#111] shadow-inner">
+        <div className="absolute top-[27%] left-[35%] w-[42%] h-[42%] z-30 rounded-full overflow-hidden bg-[#111] shadow-inner border-[6px] border-[#222]">
             <div className="w-full h-full relative rounded-full overflow-hidden">
                   {/* The Actual Video Feed */}
                   <video
@@ -179,7 +179,7 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
         <button
           onClick={handleShutter}
           disabled={isProcessing || !!cameraError}
-          className={`absolute top-[43%] left-[12.5%] z-40 w-[15%] h-[15%] rounded-full 
+          className={`absolute top-[45%] left-[11%] z-40 w-[16%] h-[16%] rounded-full 
             group cursor-pointer transition-transform active:scale-95 flex items-center justify-center
             ${isProcessing ? 'cursor-wait' : ''}
           `}
@@ -187,9 +187,9 @@ export const RetroCamera: React.FC<RetroCameraProps> = ({ onTakePhoto, isProcess
           aria-label="Take Photo"
         >
            {/* Visual styling for the pink button */}
-           <div className="w-full h-full rounded-full bg-black/10 shadow-inner flex items-center justify-center">
-               <div className={`w-[90%] h-[90%] rounded-full bg-[#E6C6BA] shadow-[inset_0_2px_4px_rgba(255,255,255,0.4),0_2px_4px_rgba(0,0,0,0.3)] border border-[#C09E92] 
-                  group-hover:bg-[#f0d4c8] transition-colors
+           <div className="w-full h-full rounded-full bg-black/20 shadow-lg flex items-center justify-center border-2 border-white/20">
+               <div className={`w-[85%] h-[85%] rounded-full bg-[#E6C6BA] shadow-[inset_0_2px_4px_rgba(255,255,255,0.5),0_2px_6px_rgba(0,0,0,0.2)] border-2 border-[#fff0e6]
+                  group-hover:bg-[#ebcdc1] transition-colors
                   ${isProcessing ? 'animate-pulse bg-red-400/50' : ''}
                `}></div>
            </div>
