@@ -12,6 +12,7 @@ import { PhotoData } from '../types';
    -- 1. ADD MISSING COLUMNS (Run this if table exists but update fails)
    ----------------------------------------------------------------
    alter table photos add column if not exists author_name text;
+   alter table photos add column if not exists bio text;
    alter table photos add column if not exists social_handle text;
 
    ----------------------------------------------------------------
@@ -22,6 +23,7 @@ import { PhotoData } from '../types';
      image_url text not null,
      caption text,
      author_name text,
+     bio text,
      social_handle text,
      date text,
      rotation numeric,
@@ -77,6 +79,7 @@ interface DBPhoto {
   image_url: string;
   caption: string;
   author_name?: string;
+  bio?: string;
   social_handle?: string;
   date: string;
   rotation: number;
@@ -110,6 +113,14 @@ const saveLocalBackup = (photo: PhotoData) => {
       }
   } catch (e) {
       console.warn("Local storage full or disabled, skipping backup");
+      // Optional: Clear old items if full
+      try {
+         const current = getLocalPhotos();
+         if (current.length > 10) {
+            const shrunk = current.slice(0, 10);
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(shrunk));
+         }
+      } catch (e2) {}
   }
 };
 
@@ -193,7 +204,8 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
           z_index: photoMetadata.zIndex,
           x: photoMetadata.x || 0,
           y: photoMetadata.y || 0,
-          author_name: photoMetadata.authorName,
+          author_name: photoMetadata.authorName, // Keep for legacy
+          bio: photoMetadata.bio, // NEW FIELD
           social_handle: photoMetadata.socialHandle
         }
       ]);
@@ -222,7 +234,7 @@ export const uploadAndSavePhoto = async (base64Image: string, photoMetadata: Omi
 };
 
 /**
- * Update photo details (Name, Social, Caption)
+ * Update photo details (Bio, Social, Caption)
  */
 export const updatePhoto = async (id: string, updates: Partial<PhotoData>) => {
   // Update Local Backup first
@@ -239,6 +251,7 @@ export const updatePhoto = async (id: string, updates: Partial<PhotoData>) => {
       const dbUpdates: any = {};
       if (updates.caption !== undefined) dbUpdates.caption = updates.caption;
       if (updates.authorName !== undefined) dbUpdates.author_name = updates.authorName;
+      if (updates.bio !== undefined) dbUpdates.bio = updates.bio; // NEW FIELD
       if (updates.socialHandle !== undefined) dbUpdates.social_handle = updates.socialHandle;
 
       // If nothing to update on DB, return
@@ -248,10 +261,10 @@ export const updatePhoto = async (id: string, updates: Partial<PhotoData>) => {
       
       if (error) {
           if (error.code === '42703' || error.message.includes('column')) {
-              console.warn("⚠️ UPDATE FAILED: Database is missing 'author_name' or 'social_handle'.");
+              console.warn("⚠️ UPDATE FAILED: Database is missing 'bio' or 'social_handle'.");
               console.warn("👉 ACTION REQUIRED: Run the SQL script at the top of services/supabase.ts in your Supabase Dashboard.");
           } else if (error.code === '42501') {
-              console.warn("⚠️ UPDATE FAILED: Permission denied. Check RLS policies.");
+              console.warn("⚠️ UPDATE FAILED: Permission denied. Check RLS policies (Public update).");
           } else {
              console.error("Error updating photo:", error.message);
           }
@@ -291,6 +304,7 @@ export const clearAllPhotos = async () => {
         const ids = photos.map(p => p.id);
         const storagePaths = ids.map(id => `public/${id}.jpg`);
 
+        // We use loops or smaller batches if many, but for now single bulk delete
         const { error: deleteError } = await supabase.from('photos').delete().in('id', ids);
         if (deleteError) console.warn("Failed to delete rows:", deleteError.message);
 
@@ -327,6 +341,7 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
     imageUrl: row.image_url,
     caption: row.caption || "",
     authorName: row.author_name || "",
+    bio: row.bio || row.author_name || "", // Use bio, fallback to author_name
     socialHandle: row.social_handle || "",
     date: row.date || new Date().toLocaleDateString(),
     rotation: Number(row.rotation) || 0,
@@ -352,6 +367,7 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
   };
 
   fetchCloud();
+  // Poll every 2 seconds for consistency
   const pollInterval = setInterval(fetchCloud, 2000);
 
   const channel = supabase
@@ -374,18 +390,15 @@ export const useRealtimePhotos = (onPhotosUpdated: (photos: PhotoData[]) => void
         }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+       if (status === 'SUBSCRIBED') {
+           // console.log("Realtime connected");
+       }
+    });
 
   const handleLocalUpdate = () => {
       const local = getLocalPhotos();
-      if (local.length === 0 && currentPhotos.length > 0) {
-         // If local was cleared, we might want to refresh from cloud or respect the clear
-         // For now, let's just sync
-         // currentPhotos = [];
-         // onPhotosUpdated([]);
-      } else {
-         update(local);
-      }
+      update(local);
   };
 
   window.addEventListener('local-gallery-update', handleLocalUpdate);

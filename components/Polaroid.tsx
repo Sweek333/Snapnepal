@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React from 'react';
 import { PhotoData } from '../types';
 
 interface PolaroidProps {
@@ -10,24 +9,18 @@ interface PolaroidProps {
   onUpdate?: (id: string, data: Partial<PhotoData>) => void;
 }
 
-export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 'scattered', onDelete, onUpdate }) => {
+export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 'scattered', onDelete }) => {
   const isScattered = variant === 'scattered';
   const isFilmstrip = variant === 'filmstrip';
   const isGrid = variant === 'grid';
 
-  // Local state for editable inputs
-  // We map authorName -> Bio in the UI
-  const [authorName, setAuthorName] = useState(photo.authorName || "");
-  const [socialHandle, setSocialHandle] = useState(photo.socialHandle || "");
+  // Format time for default social handle (e.g. 12:30 PM)
+  const timeString = new Date(photo.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  const handleBlur = () => {
-      if (onUpdate) {
-          // Only update if changed
-          if (authorName !== (photo.authorName || "") || socialHandle !== (photo.socialHandle || "")) {
-              onUpdate(photo.id, { authorName, socialHandle });
-          }
-      }
-  };
+  // Determine display text (Static, non-editable)
+  // Defaults: Bio -> Date, Social -> Time
+  const displayBio = photo.bio || photo.authorName || photo.date;
+  const displaySocial = photo.socialHandle || timeString;
 
   // Inline styles for positioning
   let style = {};
@@ -92,41 +85,29 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
         <div className="absolute inset-0 shadow-[inset_0_0_40px_rgba(0,0,0,0.5)] pointer-events-none opacity-40"></div>
       </div>
 
-      {/* Footer Area: Inputs for Grid, Static Text for others */}
+      {/* Footer Area */}
       <div className="text-center transform -rotate-1 w-full flex flex-col justify-end">
         
-        {/* Grid Mode: Editable Inputs */}
+        {/* Grid Mode: Static Text (Was Editable) */}
         {isGrid && (
-           <div className="flex flex-col gap-1 w-full px-0.5">
-              <input 
-                type="text" 
-                placeholder="Your Bio..." 
-                className="font-hand text-center bg-transparent border-b border-gray-200 focus:border-gray-400 outline-none text-gray-800 text-sm sm:text-base w-full placeholder:text-gray-300 transition-colors"
-                value={authorName}
-                onChange={(e) => setAuthorName(e.target.value)}
-                onBlur={handleBlur}
-                maxLength={25}
-              />
-              <input 
-                type="text" 
-                placeholder="@social" 
-                className="font-hand text-center bg-transparent border-b-0 outline-none text-gray-500 text-[10px] sm:text-xs w-full placeholder:text-gray-300"
-                value={socialHandle}
-                onChange={(e) => setSocialHandle(e.target.value)}
-                onBlur={handleBlur}
-                maxLength={25}
-              />
+           <div className="flex flex-col gap-0.5 w-full px-1">
+              <p className="font-hand text-center text-gray-800 text-sm sm:text-base truncate leading-tight font-bold">
+                {displayBio}
+              </p>
+              <p className="font-hand text-center text-gray-500 text-[10px] sm:text-xs truncate leading-tight">
+                {displaySocial}
+              </p>
            </div>
         )}
 
         {/* Scattered/Filmstrip Mode: Static Caption */}
         {!isGrid && (
-           <p className={`font-hand text-gray-800 leading-tight truncate px-1 ${isScattered ? 'text-xl mb-1' : 'text-[11px] mb-0 font-bold'}`}>
+           <p className={`font-hand text-gray-800 leading-tight truncate px-1 ${isScattered ? 'text-xl mb-1' : 'text-[11px] mb-0 font-bold'} ${photo.caption === 'Developing magic... ✨' ? 'animate-pulse text-gray-400' : ''}`}>
             {photo.caption}
            </p>
         )}
 
-        {/* Date always at bottom (except filmstrip) */}
+        {/* Date always at bottom (except filmstrip/grid) */}
         {!isFilmstrip && !isGrid && (
           <p className={`font-hand text-gray-400 tracking-widest mt-1 ${isScattered ? 'text-sm' : 'text-[10px] sm:text-xs'}`}>
             {photo.date}
