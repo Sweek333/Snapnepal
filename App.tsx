@@ -7,9 +7,7 @@ import { generatePhotoCaption } from './services/geminiService';
 import { 
   uploadAndSavePhoto, 
   useRealtimePhotos,
-  updatePhoto,
-  deletePhoto,
-  clearAllPhotos
+  updatePhoto
 } from './services/supabase';
 
 // Helper to generate random numbers within a range
@@ -100,21 +98,6 @@ const App: React.FC = () => {
       await updatePhoto(id, data);
   };
 
-  const handleDeletePhoto = async (id: string) => {
-      // Optimistic update
-      setGalleryPhotos(prev => prev.filter(p => p.id !== id));
-      await deletePhoto(id);
-      showNotification("Memory deleted forever.", "success");
-  };
-
-  const handleClearGallery = async () => {
-      // Optimistic clear
-      setGalleryPhotos([]);
-      await clearAllPhotos();
-      setIsGalleryOpen(false);
-      showNotification("Gallery reset for everyone.", "success");
-  };
-
   return (
     <div className="relative w-full h-screen bg-[#e5e5e5] flex flex-col items-center justify-center overflow-hidden">
       {/* Background Dot Pattern */}
@@ -170,8 +153,6 @@ const App: React.FC = () => {
         photos={galleryPhotos}
         onRefresh={refreshGalleryRef.current}
         onUpdatePhoto={handleUpdatePhoto}
-        onDelete={handleDeletePhoto}
-        onClear={handleClearGallery}
       />
 
       {/* Toast Notification */}

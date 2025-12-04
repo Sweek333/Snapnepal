@@ -1,15 +1,15 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { PhotoData } from '../types';
 
 interface PolaroidProps {
   photo: PhotoData;
   onClick?: () => void;
   variant?: 'scattered' | 'grid' | 'filmstrip';
-  onDelete?: () => void;
   onUpdate?: (id: string, data: Partial<PhotoData>) => void;
 }
 
-export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 'scattered', onDelete }) => {
+export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 'scattered', onUpdate }) => {
   const isScattered = variant === 'scattered';
   const isFilmstrip = variant === 'filmstrip';
   const isGrid = variant === 'grid';
@@ -17,10 +17,28 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
   // Format time for default social handle (e.g. 12:30 PM)
   const timeString = new Date(photo.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  // Determine display text (Static, non-editable)
-  // Defaults: Bio -> Date, Social -> Time
-  const displayBio = photo.bio || photo.authorName || photo.date;
-  const displaySocial = photo.socialHandle || timeString;
+  // Local state for editable fields
+  const [bio, setBio] = useState(photo.bio || photo.date);
+  const [socialHandle, setSocialHandle] = useState(photo.socialHandle || timeString);
+
+  // Sync state if prop changes (e.g. real-time update from someone else)
+  useEffect(() => {
+    setBio(photo.bio || photo.date);
+    setSocialHandle(photo.socialHandle || timeString);
+  }, [photo.bio, photo.socialHandle, photo.date, timeString]);
+
+  // Handle Input Changes
+  const handleBlur = () => {
+     if (onUpdate) {
+        // Only update if changed
+        if (bio !== (photo.bio || photo.date) || socialHandle !== (photo.socialHandle || timeString)) {
+            onUpdate(photo.id, { 
+                bio: bio, 
+                socialHandle: socialHandle 
+            });
+        }
+     }
+  };
 
   // Inline styles for positioning
   let style = {};
@@ -54,25 +72,7 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
 
   return (
     <div onClick={onClick} style={style} className={containerClasses}>
-      {/* Delete Button (Only show if handler provided and NOT in filmstrip mode) */}
-      {onDelete && !isFilmstrip && (
-        <div 
-            className="absolute -top-3 -right-3 z-[100] w-10 h-10 flex items-center justify-center cursor-pointer pointer-events-auto touch-manipulation opacity-80 hover:opacity-100 transition-opacity"
-            onClick={(e) => {
-                e.stopPropagation();
-                e.nativeEvent.stopImmediatePropagation();
-                onDelete();
-            }}
-        >
-            <div 
-              className="bg-red-500 text-white w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center shadow-lg border-2 border-white transition-all duration-200 hover:bg-red-600 hover:scale-110 active:scale-90"
-              title="Delete Photo"
-            >
-              <span className="text-sm font-bold leading-none pb-0.5">×</span>
-            </div>
-        </div>
-      )}
-
+      
       {/* Photo Area */}
       <div className={`w-full aspect-square bg-gray-900 overflow-hidden border border-gray-100 filter sepia-[0.3] contrast-[1.1] ${isFilmstrip ? 'mb-1' : 'mb-2 sm:mb-4'}`}>
         <img
@@ -88,15 +88,27 @@ export const Polaroid: React.FC<PolaroidProps> = ({ photo, onClick, variant = 's
       {/* Footer Area */}
       <div className="text-center transform -rotate-1 w-full flex flex-col justify-end">
         
-        {/* Grid Mode: Static Text (Was Editable) */}
+        {/* Grid Mode: Editable Inputs */}
         {isGrid && (
-           <div className="flex flex-col gap-0.5 w-full px-1">
-              <p className="font-hand text-center text-gray-800 text-sm sm:text-base truncate leading-tight font-bold">
-                {displayBio}
-              </p>
-              <p className="font-hand text-center text-gray-500 text-[10px] sm:text-xs truncate leading-tight">
-                {displaySocial}
-              </p>
+           <div className="flex flex-col gap-1 w-full px-1">
+              <input 
+                type="text" 
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                onBlur={handleBlur}
+                placeholder="Your Bio..."
+                maxLength={25}
+                className="font-hand text-center text-gray-800 text-sm sm:text-base leading-tight font-bold bg-transparent border-b border-transparent hover:border-gray-300 focus:border-gray-400 focus:outline-none placeholder-gray-300 truncate w-full p-0 m-0"
+              />
+              <input 
+                type="text"
+                value={socialHandle}
+                onChange={(e) => setSocialHandle(e.target.value)}
+                onBlur={handleBlur}
+                placeholder={timeString}
+                maxLength={20}
+                className="font-hand text-center text-gray-500 text-[10px] sm:text-xs leading-tight bg-transparent border-b border-transparent hover:border-gray-300 focus:border-gray-400 focus:outline-none placeholder-gray-300 truncate w-full p-0 m-0"
+              />
            </div>
         )}
 

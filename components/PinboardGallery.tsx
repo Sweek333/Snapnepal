@@ -9,21 +9,12 @@ interface PinboardGalleryProps {
   photos: PhotoData[];
   onRefresh?: () => Promise<void>;
   onUpdatePhoto?: (id: string, data: Partial<PhotoData>) => void;
-  onDelete?: (id: string) => Promise<void>;
-  onClear?: () => Promise<void>;
 }
 
-type ConfirmType = 'DELETE_PHOTO' | 'CLEAR_GALLERY' | null;
-
-export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClose, photos, onRefresh, onUpdatePhoto, onDelete, onClear }) => {
+export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClose, photos, onRefresh, onUpdatePhoto }) => {
   // Pull to refresh state
   const [pullY, setPullY] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
-  // Custom Confirmation Modal State
-  const [confirmType, setConfirmType] = useState<ConfirmType>(null);
-  const [targetPhotoId, setTargetPhotoId] = useState<string | null>(null);
-  const [isProcessingAction, setIsProcessingAction] = useState(false);
   
   const startY = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -33,7 +24,6 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
     if (isOpen) {
         setPullY(0);
         setIsRefreshing(false);
-        setConfirmType(null);
     }
   }, [isOpen]);
 
@@ -84,42 +74,6 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
      setIsRefreshing(false);
   };
 
-  // --- DELETE HANDLERS ---
-
-  const requestDeletePhoto = (id: string) => {
-      setTargetPhotoId(id);
-      setConfirmType('DELETE_PHOTO');
-  };
-
-  const requestClearGallery = () => {
-      setConfirmType('CLEAR_GALLERY');
-  };
-
-  const handleConfirmAction = async () => {
-      if (!confirmType) return;
-      setIsProcessingAction(true);
-      
-      try {
-          if (confirmType === 'DELETE_PHOTO' && targetPhotoId && onDelete) {
-              await onDelete(targetPhotoId);
-          } else if (confirmType === 'CLEAR_GALLERY' && onClear) {
-              await onClear();
-          }
-      } catch (error) {
-          console.error("Action failed", error);
-          alert("Action failed. Please check your connection.");
-      } finally {
-          setIsProcessingAction(false);
-          setConfirmType(null);
-          setTargetPhotoId(null);
-      }
-  };
-
-  const handleCancelAction = () => {
-      setConfirmType(null);
-      setTargetPhotoId(null);
-  };
-
   if (!isOpen) return null;
 
   return (
@@ -138,17 +92,6 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
           </div>
           <div className="flex items-center gap-2">
              
-             {/* Reset/Clear Button - Everyone */}
-             {onClear && (
-                 <button
-                    onClick={requestClearGallery}
-                    className="bg-red-500/20 hover:bg-red-500/40 text-red-200 border-2 border-red-300/50 w-8 h-8 rounded-full flex items-center justify-center transition-colors mr-1 cursor-pointer"
-                    title="Reset Gallery"
-                 >
-                    <span className="text-sm">🗑️</span>
-                 </button>
-             )}
-
              {/* Refresh Button */}
              {onRefresh && (
                  <button
@@ -221,7 +164,6 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
                                 photo={photo} 
                                 variant="grid" 
                                 onUpdate={onUpdatePhoto}
-                                onDelete={onDelete ? () => requestDeletePhoto(photo.id) : undefined}
                             />
                         </div>
                     </div>
@@ -230,43 +172,6 @@ export const PinboardGallery: React.FC<PinboardGalleryProps> = ({ isOpen, onClos
               )}
            </div>
         </div>
-
-        {/* Custom Confirmation Modal */}
-        {confirmType && (
-            <div className="absolute inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-                <div className="bg-[#fdfdfd] p-6 rounded-lg shadow-2xl max-w-sm w-full border-4 border-[#795548] transform scale-100 animate-in zoom-in-95 duration-200">
-                    <h3 className="font-hand text-2xl font-bold text-[#5d4037] mb-2 text-center">
-                        {confirmType === 'CLEAR_GALLERY' ? 'Reset Gallery?' : 'Delete Photo?'}
-                    </h3>
-                    <p className="font-hand text-lg text-gray-600 text-center mb-6 leading-tight">
-                        {confirmType === 'CLEAR_GALLERY' 
-                            ? 'Warning: This will permanently delete ALL photos for everyone. This cannot be undone!' 
-                            : 'Are you sure you want to remove this memory forever?'}
-                    </p>
-                    
-                    <div className="flex gap-3 justify-center">
-                        <button 
-                            onClick={handleCancelAction}
-                            disabled={isProcessingAction}
-                            className="flex-1 py-2 border-2 border-[#a1887f] text-[#5d4037] font-bold rounded-full hover:bg-[#efebe9] transition-colors disabled:opacity-50 font-hand text-lg"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={handleConfirmAction}
-                            disabled={isProcessingAction}
-                            className="flex-1 py-2 bg-red-500 text-white font-bold rounded-full shadow-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:bg-red-400 flex items-center justify-center gap-2 font-hand text-lg"
-                        >
-                            {isProcessingAction ? (
-                                <span className="block w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></span>
-                            ) : (
-                                <span>{confirmType === 'CLEAR_GALLERY' ? 'Reset All' : 'Delete'}</span>
-                            )}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
 
       </div>
     </div>
